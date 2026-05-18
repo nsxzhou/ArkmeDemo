@@ -42,3 +42,36 @@ Implemented the Arrangements V1 foundation, updated requirement progress, archiv
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: Arrangements V2 AI self recognition
+
+**Date**: 2026-05-18
+**Task**: Arrangements V2 AI self recognition
+**Branch**: `main`
+
+### Summary
+
+Implemented V2 real OpenAI-compatible recognition for Send to self: local AI model settings, automatic arrangement extraction and creation, inline recognition feedback, idempotent recognition state, arrangement detail jump, documentation updates, and real LLM verification with the provided local-only credentials. Verified lint, build, answer checks, browser flow, persistence, and no API key committed.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `547310e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
