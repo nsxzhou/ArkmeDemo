@@ -5,6 +5,7 @@ import ChatInput from "@/components/ChatInput";
 import ChatList from "@/components/ChatList";
 import RecordDetailSheet from "@/components/RecordDetailSheet";
 import RecordFullDetailScreen from "@/components/RecordFullDetailScreen";
+import Arrangements from "@/pages/Arrangements";
 import Records from "@/pages/Records";
 import { aiConversationLogEntries } from "@/data/aiConversationLog";
 import { useCandidateProfile } from "@/data/candidateProfile";
@@ -57,6 +58,7 @@ type TabItem = {
 
 const tabs: TabItem[] = [
   { key: "records" },
+  { key: "arrangements" },
   { key: "insight" },
   { key: "mine" },
 ];
@@ -1168,6 +1170,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           onOpenAbout={() => setSettingsView("about")}
         />
       );
+    }
+
+    if (currentPage === "arrangements") {
+      return <Arrangements />;
     }
 
     if (currentPage === "insight") {
@@ -3430,6 +3436,7 @@ function ThemePreview({ mode }: { mode: ResolvedTheme }) {
 
 function getTabLabel(page: PageType, t: ReturnType<typeof usePreferences>["t"]) {
   if (page === "records") return t("tabs.records");
+  if (page === "arrangements") return t("tabs.arrangements");
   if (page === "insight") return t("tabs.insight");
   return t("tabs.mine");
 }
