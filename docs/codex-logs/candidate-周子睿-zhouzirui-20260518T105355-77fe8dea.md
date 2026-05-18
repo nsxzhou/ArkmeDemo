@@ -167,7 +167,7 @@ PLEASE IMPLEMENT THIS PLAN: 分阶段完成「安排」模块；V1 先交付底�
 .trellis中的两个任务也已经完成了
 
 ### AI 最终输出
-已按确认处理 Trellis 任务收口：修正上一轮提交推送记录为真实结果，并将 `.trellis/tasks/00-bootstrap-guidelines` 与 `.trellis/tasks/05-18-arrangements-v1-foundation` 归档为已完成任务；随后记录本轮 Trellis 工作收口日志并推送归档与日志提交。
+已按确认处理 Trellis 任务收口：修正上一轮提交推送记录为真实结果，并将 `.trellis/tasks/00-bootstrap-guidelines` 与 `.trellis/tasks/05-18-arrangements-v1-foundation` 归档为已完成任务；同时记录 Trellis session journal。当前 `.trellis/tasks/` 下活跃任务数为 0。
 
 ### 本轮改动文件
 - .trellis/tasks/archive/
@@ -177,5 +177,8 @@ PLEASE IMPLEMENT THIS PLAN: 分阶段完成「安排」模块；V1 先交付底�
 
 ### 验证结果
 - 已确认上一轮提交推送记录存在但需要修正为真实提交哈希和推送结果
-- 待执行 `pnpm verify:answer`
-- 待执行 Trellis 任务归档、journal 记录、提交和推送
+- `pnpm verify:answer` 通过
+- `task.py archive 00-bootstrap-guidelines` 成功，归档提交 `18b74eb chore(task): archive 00-bootstrap-guidelines`
+- `task.py archive 05-18-arrangements-v1-foundation` 成功，归档提交 `bc404f0 chore(task): archive 05-18-arrangements-v1-foundation`
+- `add_session.py` 成功记录 Trellis journal，提交 `c654cd4 chore: record journal`
+- `task.py list` 显示当前活跃任务数为 0，`task.py list-archive` 显示 2026-05 归档 2 个任务
