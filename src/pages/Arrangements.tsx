@@ -35,7 +35,13 @@ const timeKindOptions: ArrangementTimeKind[] = [
   "none",
 ];
 
-export default function Arrangements() {
+export default function Arrangements({
+  targetArrangementId,
+  onTargetHandled,
+}: {
+  targetArrangementId?: string | null;
+  onTargetHandled?: () => void;
+}) {
   const { resolvedLocale, t } = usePreferences();
   const [arrangements, setArrangements] = React.useState(getInitialArrangements);
   const [editingArrangement, setEditingArrangement] = React.useState<ArrangementItem | null>(null);
@@ -56,6 +62,17 @@ export default function Arrangements() {
     setArrangements(nextArrangements);
     persistArrangements(nextArrangements);
   }, []);
+
+  React.useEffect(() => {
+    if (!targetArrangementId) return;
+    const targetArrangement = arrangements.find(
+      (arrangement) => arrangement.id === targetArrangementId
+    );
+    if (targetArrangement) {
+      setViewingArrangement(targetArrangement);
+    }
+    onTargetHandled?.();
+  }, [arrangements, onTargetHandled, targetArrangementId]);
 
   const openCreateSheet = () => {
     setEditingArrangement(null);

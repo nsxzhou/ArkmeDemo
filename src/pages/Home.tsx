@@ -8,7 +8,19 @@ import RecordFullDetailScreen from "@/components/RecordFullDetailScreen";
 import Arrangements from "@/pages/Arrangements";
 import Records from "@/pages/Records";
 import { aiConversationLogEntries } from "@/data/aiConversationLog";
+import {
+  getInitialAiModelSettings,
+  persistAiModelSettings,
+  type AiModelSettings,
+} from "@/data/aiModelSettings";
 import { useCandidateProfile } from "@/data/candidateProfile";
+import {
+  createRecognitionState,
+  getInitialSelfArrangementRecognitionStates,
+  persistSelfArrangementRecognitionStates,
+  recognizeSelfRecordArrangement,
+  type SelfArrangementRecognitionState,
+} from "@/data/selfArrangementRecognition";
 import {
   createTestReplyMessage,
   demoSenderIdentityId,
@@ -106,6 +118,8 @@ type HomeMessagePreview = {
   message: TestMessage;
   unreadCount: number;
 };
+
+type AiSettingsDraft = AiModelSettings;
 
 const quickSearchTypes: QuickSearchType[] = [
   "image",
@@ -344,8 +358,13 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
   const [sendToSelfTargetUid, setSendToSelfTargetUid] = React.useState<string | null>(null);
   const [activeTestIdentityId, setActiveTestIdentityId] = React.useState<string | null>(null);
   const [testConversationTargetUid, setTestConversationTargetUid] = React.useState<string | null>(null);
-  const [settingsView, setSettingsView] = React.useState<null | "settings" | "appearance" | "about">(
-    null
+  const [settingsView, setSettingsView] = React.useState<
+    null | "settings" | "appearance" | "ai" | "about"
+  >(null);
+  const [targetArrangementId, setTargetArrangementId] = React.useState<string | null>(null);
+  const [aiModelSettings, setAiModelSettings] = React.useState(getInitialAiModelSettings);
+  const [selfRecognitionStates, setSelfRecognitionStates] = React.useState(
+    getInitialSelfArrangementRecognitionStates
   );
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchHistory, setSearchHistory] = React.useState(getInitialSearchHistory);
@@ -759,23 +778,70 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     });
   }, []);
 
+  const upsertSelfRecognitionState = React.useCallback(
+    (nextState: SelfArrangementRecognitionState) => {
+      setSelfRecognitionStates((prev) => {
+        const nextStates = [
+          ...prev.filter((state) => state.recordUid !== nextState.recordUid),
+          nextState,
+        ];
+        persistSelfArrangementRecognitionStates(nextStates);
+        return nextStates;
+      });
+    },
+    []
+  );
+
+  const runSelfArrangementRecognition = React.useCallback(
+    (record: RecordItem) => {
+      const existingState = selfRecognitionStates.find(
+        (state) => state.recordUid === record.uid
+      );
+
+      if (existingState?.createdArrangementId) return;
+
+      const recognizingState = createRecognitionState(record.uid, "recognizing");
+      upsertSelfRecognitionState(recognizingState);
+
+      recognizeSelfRecordArrangement({
+        record,
+        settings: aiModelSettings,
+        existingState,
+      })
+        .then(upsertSelfRecognitionState)
+        .catch((error: unknown) => {
+          upsertSelfRecognitionState(
+            createRecognitionState(
+              record.uid,
+              "failed",
+              error instanceof Error ? error.message : t("sendToSelf.aiFailed")
+            )
+          );
+        });
+    },
+    [aiModelSettings, selfRecognitionStates, t, upsertSelfRecognitionState]
+  );
+
   const createSelfRecord = React.useCallback((content: string) => {
     const timestamp = Date.now();
+    const nextRecord: RecordItem = {
+      uid: `self-${timestamp}`,
+      text_content: content,
+      send_at: timestamp,
+      create_at: timestamp,
+      update_at: timestamp,
+    };
+
     setCreatedSelfRecords((prev) => {
-      const nextRecords = [
-        ...prev,
-        {
-          uid: `self-${timestamp}`,
-          text_content: content,
-          send_at: timestamp,
-          create_at: timestamp,
-          update_at: timestamp,
-        },
-      ];
+      const nextRecords = [...prev, nextRecord];
       persistCreatedSelfRecords(nextRecords);
       return nextRecords;
     });
-  }, []);
+
+    if (aiModelSettings.autoRecognizeSelfMessages) {
+      runSelfArrangementRecognition(nextRecord);
+    }
+  }, [aiModelSettings.autoRecognizeSelfMessages, runSelfArrangementRecognition]);
 
   const createRecordExtension = React.useCallback((parentRecord: RecordItem, content: string) => {
     const timestamp = Date.now();
@@ -1089,6 +1155,20 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
       return <AppearanceStyleScreen onBack={() => setSettingsView("settings")} />;
     }
 
+    if (settingsView === "ai") {
+      return (
+        <AiModelSettingsScreen
+          settings={aiModelSettings}
+          onBack={() => setSettingsView("settings")}
+          onSave={(nextSettings) => {
+            setAiModelSettings(nextSettings);
+            persistAiModelSettings(nextSettings);
+            setSettingsView("settings");
+          }}
+        />
+      );
+    }
+
     if (settingsView === "about") {
       return <AboutScreen onBack={() => setSettingsView(null)} />;
     }
@@ -1098,6 +1178,8 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         <SettingsScreen
           onBack={() => setSettingsView(null)}
           onOpenAppearance={() => setSettingsView("appearance")}
+          onOpenAi={() => setSettingsView("ai")}
+          aiConfigured={Boolean(aiModelSettings.apiKey)}
         />
       );
     }
@@ -1118,8 +1200,17 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         <SendToSelfConversationChat
           records={selfRecords}
           targetUid={sendToSelfTargetUid}
+          aiSettings={aiModelSettings}
+          recognitionStates={selfRecognitionStates}
           onBack={handleConversationBack}
           onCreateRecord={createSelfRecord}
+          onRetryRecognition={runSelfArrangementRecognition}
+          onOpenAiSettings={() => setSettingsView("ai")}
+          onOpenArrangement={(arrangementId) => {
+            setTargetArrangementId(arrangementId);
+            setShowSendToSelf(false);
+            onNavigate("arrangements");
+          }}
           onOpenRecordDetail={setRecordDetail}
           onOpenRecordSnapshot={setRecordSnapshot}
         />
@@ -1173,7 +1264,12 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     }
 
     if (currentPage === "arrangements") {
-      return <Arrangements />;
+      return (
+        <Arrangements
+          targetArrangementId={targetArrangementId}
+          onTargetHandled={() => setTargetArrangementId(null)}
+        />
+      );
     }
 
     if (currentPage === "insight") {
@@ -2316,19 +2412,33 @@ function AiToolConversationChat({
 function SendToSelfConversationChat({
   records,
   targetUid,
+  aiSettings,
+  recognitionStates,
   onBack,
   onCreateRecord,
+  onRetryRecognition,
+  onOpenAiSettings,
+  onOpenArrangement,
   onOpenRecordDetail,
   onOpenRecordSnapshot,
 }: {
   records: RecordItem[];
   targetUid?: string | null;
+  aiSettings: AiModelSettings;
+  recognitionStates: SelfArrangementRecognitionState[];
   onBack: () => void;
   onCreateRecord: (content: string) => void;
+  onRetryRecognition: (record: RecordItem) => void;
+  onOpenAiSettings: () => void;
+  onOpenArrangement: (arrangementId: string) => void;
   onOpenRecordDetail: (record: RecordItem) => void;
   onOpenRecordSnapshot: (record: RecordItem) => void;
 }) {
   const { t } = usePreferences();
+  const recognitionStateByRecordUid = React.useMemo(
+    () => new Map(recognitionStates.map((state) => [state.recordUid, state])),
+    [recognitionStates]
+  );
   const recordsWithoutSource = React.useMemo(
     () => records.map(({ sourceConversation: _sourceConversation, ...record }) => record),
     [records]
@@ -2363,11 +2473,45 @@ function SendToSelfConversationChat({
         </div>
       </header>
 
+      {aiSettings.autoRecognizeSelfMessages && !aiSettings.apiKey && (
+        <div className="shrink-0 bg-bg px-4 py-2">
+          <button
+            type="button"
+            onClick={onOpenAiSettings}
+            className="flex w-full items-center justify-between rounded-[12px] border border-border-light bg-surface px-3 py-2.5 text-left transition active:scale-[0.99]"
+          >
+            <span className="min-w-0">
+              <span className="block text-[13px] font-medium leading-5 text-text">
+                {t("sendToSelf.aiSetupTitle")}
+              </span>
+              <span className="block text-[11px] leading-4 text-text-tertiary">
+                {t("sendToSelf.aiSetupDesc")}
+              </span>
+            </span>
+            <span className="ml-3 shrink-0 text-[12px] font-medium text-primary">
+              {t("sendToSelf.aiSetupAction")}
+            </span>
+          </button>
+        </div>
+      )}
+
       <ChatList
         records={recordsWithoutSource}
         hasMore={false}
         loading={false}
         onLoadMore={() => undefined}
+        renderRecordAfter={(record) => {
+          const state = recognitionStateByRecordUid.get(record.uid);
+          if (!state) return null;
+          return (
+            <SelfRecognitionStatusView
+              record={record}
+              state={state}
+              onRetry={() => onRetryRecognition(record)}
+              onOpenArrangement={onOpenArrangement}
+            />
+          );
+        }}
         targetRecordUid={targetUid}
         onOpenRecordDetail={onOpenRecordDetail}
         onOpenRecordSnapshot={onOpenRecordSnapshot}
@@ -2378,6 +2522,86 @@ function SendToSelfConversationChat({
       />
     </div>
   );
+}
+
+function SelfRecognitionStatusView({
+  record,
+  state,
+  onRetry,
+  onOpenArrangement,
+}: {
+  record: RecordItem;
+  state: SelfArrangementRecognitionState;
+  onRetry: () => void;
+  onOpenArrangement: (arrangementId: string) => void;
+}) {
+  const { t } = usePreferences();
+
+  if (state.status === "created" && state.createdArrangementId) {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <button
+          type="button"
+          onClick={() => onOpenArrangement(state.createdArrangementId!)}
+          className="max-w-[82%] rounded-[10px] border border-primary/20 bg-primary-soft px-3 py-2 text-left text-[12px] leading-4 text-primary transition active:scale-[0.99]"
+        >
+          {formatTemplate(t("sendToSelf.aiCreated"), {
+            title: state.createdArrangementTitle ?? t("arrangements.title"),
+          })}
+        </button>
+      </div>
+    );
+  }
+
+  if (state.status === "recognizing") {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <p className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-[12px] leading-4 text-text-tertiary">
+          {t("sendToSelf.aiRecognizing")}
+        </p>
+      </div>
+    );
+  }
+
+  if (state.status === "none") {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <p className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-[12px] leading-4 text-text-tertiary">
+          {t("sendToSelf.aiNoArrangement")}
+        </p>
+      </div>
+    );
+  }
+
+  if (state.status === "missing_config" || state.status === "failed") {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <div className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-right">
+          <p className="text-[12px] leading-4 text-text-tertiary">
+            {state.status === "missing_config"
+              ? t("sendToSelf.aiMissingConfig")
+              : t("sendToSelf.aiFailed")}
+          </p>
+          {state.errorMessage && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-text-disabled">
+              {state.errorMessage}
+            </p>
+          )}
+          {record.uid.startsWith("self-") && (
+            <button
+              type="button"
+              onClick={onRetry}
+              className="mt-1 text-[12px] font-medium leading-4 text-primary"
+            >
+              {t("sendToSelf.aiRetry")}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function TestIdentityConversationChat({
@@ -3116,9 +3340,13 @@ function MineActionCard({
 function SettingsScreen({
   onBack,
   onOpenAppearance,
+  onOpenAi,
+  aiConfigured,
 }: {
   onBack: () => void;
   onOpenAppearance: () => void;
+  onOpenAi: () => void;
+  aiConfigured: boolean;
 }) {
   const { localeCode, resolvedLocale, t } = usePreferences();
   const [showLanguageSheet, setShowLanguageSheet] = React.useState(false);
@@ -3133,6 +3361,15 @@ function SettingsScreen({
             title={t("settings.appearance")}
             description={t("settings.appearanceDesc")}
             onClick={onOpenAppearance}
+          />
+          <SettingsListItem
+            title={t("settings.aiModel")}
+            description={
+              aiConfigured
+                ? t("settings.aiModelConfigured")
+                : t("settings.aiModelDesc")
+            }
+            onClick={onOpenAi}
           />
           <SettingsListItem
             title={t("settings.language")}
@@ -3150,6 +3387,129 @@ function SettingsScreen({
         <LanguageSheet onClose={() => setShowLanguageSheet(false)} />
       )}
     </div>
+  );
+}
+
+function AiModelSettingsScreen({
+  settings,
+  onBack,
+  onSave,
+}: {
+  settings: AiModelSettings;
+  onBack: () => void;
+  onSave: (settings: AiModelSettings) => void;
+}) {
+  const { t } = usePreferences();
+  const [draft, setDraft] = React.useState<AiSettingsDraft>(settings);
+
+  const updateDraft = <Key extends keyof AiSettingsDraft>(
+    key: Key,
+    value: AiSettingsDraft[Key]
+  ) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const canSave = draft.baseUrl.trim().length > 0 && draft.model.trim().length > 0;
+
+  return (
+    <div className="flex h-full flex-col bg-bg">
+      <MobilePageHeader title={t("settings.aiModel")} onBack={onBack} />
+
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-5 pt-3">
+        <section className="rounded-[12px] bg-surface px-3 pb-3 pt-3">
+          <h2 className="text-[15px] font-semibold leading-5 text-text">
+            {t("settings.aiConnection")}
+          </h2>
+          <p className="mt-1 text-[12px] leading-5 text-text-tertiary">
+            {t("settings.aiLocalOnly")}
+          </p>
+
+          <SettingsInput
+            label={t("settings.aiBaseUrl")}
+            value={draft.baseUrl}
+            onChange={(value) => updateDraft("baseUrl", value)}
+          />
+          <SettingsInput
+            label={t("settings.aiModelName")}
+            value={draft.model}
+            onChange={(value) => updateDraft("model", value)}
+          />
+          <SettingsInput
+            label={t("settings.aiApiKey")}
+            value={draft.apiKey}
+            type="password"
+            placeholder={t("settings.aiApiKeyPlaceholder")}
+            onChange={(value) => updateDraft("apiKey", value)}
+          />
+        </section>
+
+        <section className="mt-3 rounded-[12px] bg-surface px-3 py-3">
+          <label className="flex items-center justify-between gap-3">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold leading-5 text-text">
+                {t("settings.aiAutoRecognize")}
+              </span>
+              <span className="mt-1 block text-[12px] leading-5 text-text-tertiary">
+                {t("settings.aiAutoRecognizeDesc")}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={draft.autoRecognizeSelfMessages}
+              onChange={(event) =>
+                updateDraft("autoRecognizeSelfMessages", event.target.checked)
+              }
+              className="h-5 w-5 accent-[var(--color-primary)]"
+            />
+          </label>
+        </section>
+
+        <button
+          type="button"
+          disabled={!canSave}
+          onClick={() =>
+            onSave({
+              ...draft,
+              baseUrl: draft.baseUrl.trim(),
+              apiKey: draft.apiKey.trim(),
+              model: draft.model.trim(),
+            })
+          }
+          className="mt-4 h-11 w-full rounded-[12px] bg-primary text-[15px] font-medium text-on-primary transition disabled:bg-surface-muted disabled:text-text-disabled active:scale-[0.98]"
+        >
+          {t("common.done")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsInput({
+  label,
+  value,
+  onChange,
+  type = "text",
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  type?: "text" | "password";
+  placeholder?: string;
+}) {
+  return (
+    <label className="mt-3 block">
+      <span className="mb-1.5 block text-[13px] font-medium leading-5 text-text">
+        {label}
+      </span>
+      <input
+        type={type}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-11 w-full rounded-[12px] bg-bg px-3 text-[14px] text-text outline-none focus-glow"
+      />
+    </label>
   );
 }
 

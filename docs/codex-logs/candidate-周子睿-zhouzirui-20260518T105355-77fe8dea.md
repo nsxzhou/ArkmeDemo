@@ -182,3 +182,83 @@ PLEASE IMPLEMENT THIS PLAN: 分阶段完成「安排」模块；V1 先交付底�
 - `task.py archive 05-18-arrangements-v1-foundation` 成功，归档提交 `bc404f0 chore(task): archive 05-18-arrangements-v1-foundation`
 - `add_session.py` 成功记录 Trellis journal，提交 `c654cd4 chore: record journal`
 - `task.py list` 显示当前活跃任务数为 0，`task.py list-archive` 显示 2026-05 归档 2 个任务
+
+## 2026-05-18 21:12:04 CST (+0800)
+
+### 用户输入
+继续使用 `$grill-me` 和 `$frontend-design`，围绕 `docs/arrangements-requirement-breakdown.md` 规划 V2：真实 AI 接入与发给自己自动识别安排。
+
+### AI 最终输出
+已输出 V2 实施计划：本阶段只交付真实 AI 接入与「发给自己」自动识别安排；设置页新增 AI 模型设置，源码只预置测试服务 `baseUrl` 和 `model`，API Key 由用户本机输入并保存到 `localStorage`；发给自己发送后自动调用 OpenAI 兼容 `chat/completions`，命中安排后直接创建 `sourceType=self` 的安排项，并在聊天内显示“已创建安排”轻提示；同一条消息只创建一次，失败、未配置和 CORS 问题不阻断快记保存。V3-V5 的私聊/群聊识别、合并归集、完成判断、日历和真实通知继续后置。
+
+### 本轮改动文件
+- 无
+
+### 验证结果
+- 已读取项目规范、Trellis 上下文、`docs/arrangements-requirement-breakdown.md` 和现有安排/发给自己/设置页代码
+- 已确认 V1 已完成并归档，V2 应从真实 AI 配置与发给自己识别开始
+- 已确认本地 `~/.codex/.docs/search-and-evidence-standard.md` 缺失，外部接口依据改用官方 OpenAI 文档
+- 计划阶段未修改业务代码
+
+## 2026-05-18 21:36:26 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: V2 真实 AI 接入与发给自己自动识别安排。要求设置页新增 AI 模型设置，预置测试 `baseUrl` 和 `model`，API Key 仅本机保存；发给自己发送后自动调用 OpenAI 兼容接口识别安排，命中后直接创建安排项，并在聊天内显示轻提示；同一消息只创建一次；失败、缺配置、网络/CORS 问题不阻断快记保存。
+
+### AI 最终输出
+已实现「安排」模块 V2：新增 AI 模型设置页，预置测试 `baseUrl` 与 `model`，API Key 使用密码输入框并仅保存到本机 `localStorage`；新增 OpenAI 兼容 Chat Completions 识别客户端与发给自己识别状态存储；发给自己发送新内容后会按设置自动识别，命中时直接创建 `sourceType=self` 的安排项并记录来源上下文，聊天内显示“已创建安排”并可跳转到安排详情；未配置 API Key 会显示低干扰设置提示，API/CORS/解析失败会保留快记并显示可重试失败状态；同一条发给自己的消息通过 `recordUid` 幂等，不重复创建安排。
+
+### 本轮改动文件
+- .trellis/tasks/05-18-arrangements-v2-ai-self-recognition/
+- docs/arrangements-requirement-breakdown.md
+- src/data/aiModelSettings.ts
+- src/data/selfArrangementRecognition.ts
+- src/components/ChatList.tsx
+- src/pages/Home.tsx
+- src/pages/Arrangements.tsx
+- src/settings/preferences.ts
+- docs/codex-logs/candidate-周子睿-zhouzirui-20260518T105355-77fe8dea.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已创建并启动 Trellis 任务 `.trellis/tasks/05-18-arrangements-v2-ai-self-recognition`
+- `pnpm build` 通过
+- `pnpm lint` 通过
+- Playwright 手测通过：AI 模型设置入口、默认 baseUrl/model、API Key 密码输入、发给自己缺 Key 提示、临时测试 Key 下自动识别失败兜底、快记保存与重试提示
+- 已清理浏览器手测写入的临时 `test-key` 和测试快记
+- `pnpm verify:answer` 通过
+
+## 2026-05-18 21:47:49 CST (+0800)
+
+### 用户输入
+你使用过真实LLM进行测试吗
+
+### AI 最终输出
+没有。此前没有使用真实可用的 API Key 跑通真实 LLM 成功识别路径，也没有验证模型实际返回 `hasArrangement=true` 后自动创建安排的完整线上成功链路。已完成的是构建、lint、`pnpm verify:answer`，设置页默认值与密码输入框、本地保存、未配置 API Key 不发起请求、临时假 Key 下 API/CORS/网络失败不阻断快记保存，以及失败状态、重试入口、幂等逻辑和本地持久化路径手测。当前实现属于“接口形态与前端闭环已完成，真实 LLM 成功路径未实测”。
+
+### 本轮改动文件
+- 无
+
+### 验证结果
+- 已确认上一轮 V2 实现记录存在于当前候选人个人日志和 `src/data/aiConversationLog.ts`
+- 问答澄清阶段，未修改业务代码
+
+## 2026-05-18 21:59:36 CST (+0800)
+
+### 用户输入
+用户提供真实 OpenAI 兼容模型配置，要求使用该配置进行真实测试。API Key 属于敏感信息，本记录已脱敏，仅记录 `baseUrl=https://token-plan-cn.xiaomimimo.com/v1`、`model=mimo-v2.5` 和测试结论。
+
+### AI 最终输出
+已使用用户提供的真实模型配置完成测试。直连接口测试返回 200，模型对“后天去一趟医院”返回 `hasArrangement=true`，标题为“去医院”，并给出 `startAtIso=2026-05-20T00:00:00.000+08:00`。随后在本地移动端 Demo 中写入本机浏览器配置并发送同一句发给自己消息，浏览器真实请求 `POST /chat/completions` 返回 200，响应头包含 `access-control-allow-origin: *`，聊天内显示“已创建安排：去医院”；点击该提示成功跳转到「安排」页并自动打开对应详情。刷新后检查本地存储，识别状态 1 条、自动创建安排 1 条、快记 1 条，未重复创建。测试结束后已清理浏览器中的 AI 设置、识别状态、测试快记和测试安排；仓库文件中未检出完整 API Key。
+
+### 本轮改动文件
+- docs/codex-logs/candidate-周子睿-zhouzirui-20260518T105355-77fe8dea.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 真实直连 API：`POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200
+- 浏览器端真实请求：`POST /chat/completions` 返回 200，未遇到 CORS 阻断
+- Playwright 手测通过：发给自己发送“后天去一趟医院”后创建安排“去医院”，点击提示可打开安排详情
+- 刷新后持久化与幂等检查通过：识别状态 1 条、自动创建安排 1 条、快记 1 条
+- 已清理测试浏览器 localStorage 中的 AI 配置、识别状态、测试快记和测试安排
+- 已用 `rg` 确认完整 API Key 未写入仓库文件

@@ -10,6 +10,7 @@ type ChatListProps = {
   hasMore: boolean;
   loading: boolean;
   onLoadMore: () => void;
+  renderRecordAfter?: (record: RecordItem) => React.ReactNode;
   onOpenSourceConversation?: (source: RecordSourceConversation) => void;
   onOpenRecordDetail?: (record: RecordItem) => void;
   onOpenRecordSnapshot?: (record: RecordItem) => void;
@@ -27,6 +28,7 @@ export default function ChatList({
   hasMore,
   loading,
   onLoadMore,
+  renderRecordAfter,
   onOpenSourceConversation,
   onOpenRecordDetail,
   onOpenRecordSnapshot,
@@ -175,6 +177,7 @@ export default function ChatList({
                 : undefined
             }
           />
+          {renderRecordAfter?.(record)}
         </div>
       );
 
