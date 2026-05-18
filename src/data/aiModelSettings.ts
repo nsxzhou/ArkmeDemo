@@ -3,6 +3,7 @@ export type AiModelSettings = {
   apiKey: string;
   model: string;
   autoRecognizeSelfMessages: boolean;
+  autoRecognizePrivateReplies: boolean;
 };
 
 export const aiModelSettingsStorageKey = "arkme-demo.aiModelSettings";
@@ -12,6 +13,7 @@ export const defaultAiModelSettings: AiModelSettings = {
   apiKey: "",
   model: "mimo-v2.5",
   autoRecognizeSelfMessages: true,
+  autoRecognizePrivateReplies: true,
 };
 
 export function getInitialAiModelSettings() {
@@ -50,6 +52,10 @@ function normalizeAiModelSettings(value: unknown): AiModelSettings {
       typeof value.autoRecognizeSelfMessages === "boolean"
         ? value.autoRecognizeSelfMessages
         : defaultAiModelSettings.autoRecognizeSelfMessages,
+    autoRecognizePrivateReplies:
+      typeof value.autoRecognizePrivateReplies === "boolean"
+        ? value.autoRecognizePrivateReplies
+        : defaultAiModelSettings.autoRecognizePrivateReplies,
   };
 }
 

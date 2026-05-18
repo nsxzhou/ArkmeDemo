@@ -262,3 +262,33 @@ PLEASE IMPLEMENT THIS PLAN: V2 真实 AI 接入与发给自己自动识别安排
 - 刷新后持久化与幂等检查通过：识别状态 1 条、自动创建安排 1 条、快记 1 条
 - 已清理测试浏览器 localStorage 中的 AI 配置、识别状态、测试快记和测试安排
 - 已用 `rg` 确认完整 API Key 未写入仓库文件
+
+## 2026-05-18 23:10:23 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: V3 私聊识别安排。要求在私聊中识别“对方请求 + 我回复承诺”，高置信时创建 `sourceType=private_chat` 安排；复用 OpenAI 兼容设置并新增私聊自动识别开关；按 `conversationId + replyMessageId` 去重；成功后在私聊里显示“已创建安排”轻提示，可跳转安排详情，详情来源可回跳原私聊。随后用户提供真实 OpenAI 兼容模型配置，要求进行真实 LLM 测试。API Key 属于敏感信息，本记录已脱敏，仅记录 `baseUrl=https://token-plan-cn.xiaomimimo.com/v1`、`model=mimo-v2.5` 和测试结论。
+
+### AI 最终输出
+已实现「安排」模块 V3 私聊承诺识别：AI 设置新增“自动识别私聊回复”开关；移动端私聊中用户回复后会读取最近 8 条私聊上下文，调用 OpenAI 兼容 `chat/completions` 判断“请求 + 承诺”，仅在 `hasArrangement=true`、`isUserCommitted=true` 且 `confidence >= 0.72` 时直接创建 `sourceType=private_chat` 的安排；识别状态使用 `arkme-demo.arrangementRecognition.private` 本地持久化，并按 `conversationId + replyMessageId` 幂等，创建前再检查来源上下文防重复。私聊中成功后显示“已创建安排：{title}”轻提示，可跳转安排详情；缺 API Key 或识别失败显示低干扰提示和重试入口；无安排、低置信和非承诺回复不打扰。安排详情已支持展示多条私聊来源上下文，并可回跳原私聊定位来源消息。`docs/arrangements-requirement-breakdown.md` 已同步标记 V3 完成，V4/V5 的群聊、合并归集、完成推断、日历和真实提醒仍后置。
+
+### 本轮改动文件
+- .trellis/tasks/05-18-arrangements-v3-private-chat-recognition/
+- docs/arrangements-requirement-breakdown.md
+- src/data/aiModelSettings.ts
+- src/data/privateArrangementRecognition.ts
+- src/pages/Home.tsx
+- src/pages/Arrangements.tsx
+- src/settings/preferences.ts
+- docs/codex-logs/candidate-周子睿-zhouzirui-20260518T105355-77fe8dea.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已创建并启动 Trellis 任务 `.trellis/tasks/05-18-arrangements-v3-private-chat-recognition`
+- `pnpm lint` 通过
+- `pnpm build` 通过
+- `pnpm verify:answer` 通过
+- 真实直连 API：`POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200，模型对“明天来公司帮我带个早餐。/ 好的。”返回 `hasArrangement=true`、`isUserCommitted=true`、`confidence=0.9`
+- 浏览器端真实请求：`POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200
+- Playwright 手测通过：私聊回复“好的。”后创建安排“帮我带个早餐”，来源类型为 `private_chat`，上下文包含对方请求和我方回复，聊天内出现“已创建安排”轻提示
+- 已清理浏览器 localStorage 中的 AI 配置、私聊识别状态、测试消息和测试安排
+- 已用 `rg` 确认完整 API Key 未写入仓库文件

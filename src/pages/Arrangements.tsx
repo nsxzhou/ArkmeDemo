@@ -38,9 +38,11 @@ const timeKindOptions: ArrangementTimeKind[] = [
 export default function Arrangements({
   targetArrangementId,
   onTargetHandled,
+  onOpenSourceConversation,
 }: {
   targetArrangementId?: string | null;
   onTargetHandled?: () => void;
+  onOpenSourceConversation?: (conversationId: string, recordUid?: string) => void;
 }) {
   const { resolvedLocale, t } = usePreferences();
   const [arrangements, setArrangements] = React.useState(getInitialArrangements);
@@ -233,6 +235,7 @@ export default function Arrangements({
           onLater={() => updateArrangementStatus(viewingArrangement.id, "later")}
           onRestore={() => updateArrangementStatus(viewingArrangement.id, "pending")}
           onDelete={() => deleteArrangement(viewingArrangement.id)}
+          onOpenSourceConversation={onOpenSourceConversation}
         />
       )}
     </div>
@@ -549,6 +552,7 @@ function ArrangementDetailSheet({
   onLater,
   onRestore,
   onDelete,
+  onOpenSourceConversation,
 }: {
   arrangement: ArrangementItem;
   resolvedLocale: string;
@@ -558,11 +562,10 @@ function ArrangementDetailSheet({
   onLater: () => void;
   onRestore: () => void;
   onDelete: () => void;
+  onOpenSourceConversation?: (conversationId: string, recordUid?: string) => void;
 }) {
   const { t } = usePreferences();
   const sourceLabel = getSourceLabel(arrangement.sourceType, t);
-  const contextText =
-    arrangement.contextRefs[0]?.text ?? t("arrangements.manualContext");
 
   return (
     <SheetFrame onClose={onClose}>
@@ -622,7 +625,56 @@ function ArrangementDetailSheet({
           <h3 className="text-[13px] font-semibold leading-5 text-text">
             {t("arrangements.contextTitle")}
           </h3>
-          <p className="mt-1 text-[12px] leading-5 text-text-muted">{contextText}</p>
+          {arrangement.contextRefs.length > 0 ? (
+            <div className="mt-2 space-y-2">
+              {arrangement.contextRefs.map((contextRef, index) => {
+                const canOpenSource =
+                  contextRef.sourceType === "private_chat" &&
+                  Boolean(contextRef.conversationId) &&
+                  Boolean(onOpenSourceConversation);
+                const content = (
+                  <>
+                    <span className="block text-[11px] leading-4 text-text-tertiary">
+                      {contextRef.senderName || sourceLabel}
+                    </span>
+                    <span className="mt-0.5 block text-[12px] leading-5 text-text-muted">
+                      {contextRef.text}
+                    </span>
+                  </>
+                );
+
+                return canOpenSource ? (
+                  <button
+                    key={`${contextRef.messageId ?? contextRef.sentAt}-${index}`}
+                    type="button"
+                    onClick={() =>
+                      onOpenSourceConversation?.(
+                        contextRef.conversationId!,
+                        contextRef.messageId
+                      )
+                    }
+                    className="block w-full rounded-[10px] bg-surface-muted px-3 py-2 text-left transition active:scale-[0.99]"
+                  >
+                    {content}
+                    <span className="mt-1 block text-[11px] font-medium leading-4 text-primary">
+                      {t("arrangements.openSource")}
+                    </span>
+                  </button>
+                ) : (
+                  <div
+                    key={`${contextRef.messageId ?? contextRef.sentAt}-${index}`}
+                    className="rounded-[10px] bg-surface-muted px-3 py-2"
+                  >
+                    {content}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-1 text-[12px] leading-5 text-text-muted">
+              {t("arrangements.manualContext")}
+            </p>
+          )}
         </section>
 
         <div className="mt-4 grid grid-cols-2 gap-2">

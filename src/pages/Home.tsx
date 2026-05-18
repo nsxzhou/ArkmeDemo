@@ -22,6 +22,13 @@ import {
   type SelfArrangementRecognitionState,
 } from "@/data/selfArrangementRecognition";
 import {
+  createPrivateRecognitionState,
+  getInitialPrivateArrangementRecognitionStates,
+  persistPrivateArrangementRecognitionStates,
+  recognizePrivateReplyArrangement,
+  type PrivateArrangementRecognitionState,
+} from "@/data/privateArrangementRecognition";
+import {
   createTestReplyMessage,
   demoSenderIdentityId,
   getInitialTestGroups,
@@ -102,6 +109,7 @@ type TestConversationSummary = {
   identity?: TestIdentity;
   group?: TestGroup;
   memberIdentities: TestIdentity[];
+  messages: TestMessage[];
   records: TestConversationRecord[];
   latestMessage: TestMessage;
   latestUnreadIdentityMessage: TestMessage | null;
@@ -366,6 +374,9 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
   const [selfRecognitionStates, setSelfRecognitionStates] = React.useState(
     getInitialSelfArrangementRecognitionStates
   );
+  const [privateRecognitionStates, setPrivateRecognitionStates] = React.useState(
+    getInitialPrivateArrangementRecognitionStates
+  );
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchHistory, setSearchHistory] = React.useState(getInitialSearchHistory);
   const [recordDetail, setRecordDetail] = React.useState<RecordItem | null>(null);
@@ -628,6 +639,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             color: identity.color,
             identity,
             memberIdentities: [identity],
+            messages,
             records,
             latestMessage,
             latestUnreadIdentityMessage,
@@ -676,6 +688,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
               color: group.color,
               group,
               memberIdentities,
+              messages,
               records,
               latestMessage: {
                 id: `empty-${group.id}`,
@@ -700,6 +713,7 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
             color: group.color,
             group,
             memberIdentities,
+            messages,
             records,
             latestMessage,
             latestUnreadIdentityMessage,
@@ -792,6 +806,24 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     []
   );
 
+  const upsertPrivateRecognitionState = React.useCallback(
+    (nextState: PrivateArrangementRecognitionState) => {
+      setPrivateRecognitionStates((prev) => {
+        const nextStates = [
+          ...prev.filter(
+            (state) =>
+              state.conversationId !== nextState.conversationId ||
+              state.replyMessageId !== nextState.replyMessageId
+          ),
+          nextState,
+        ];
+        persistPrivateArrangementRecognitionStates(nextStates);
+        return nextStates;
+      });
+    },
+    []
+  );
+
   const runSelfArrangementRecognition = React.useCallback(
     (record: RecordItem) => {
       const existingState = selfRecognitionStates.find(
@@ -820,6 +852,72 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         });
     },
     [aiModelSettings, selfRecognitionStates, t, upsertSelfRecognitionState]
+  );
+
+  const runPrivateArrangementRecognition = React.useCallback(
+    ({
+      summary,
+      replyMessage,
+      messages,
+      force = false,
+    }: {
+      summary: TestConversationSummary;
+      replyMessage: TestMessage;
+      messages: TestMessage[];
+      force?: boolean;
+    }) => {
+      if (summary.conversationType !== "private") return;
+
+      const existingState = privateRecognitionStates.find(
+        (state) =>
+          state.conversationId === summary.conversationId &&
+          state.replyMessageId === replyMessage.id
+      );
+
+      if (
+        existingState &&
+        !force &&
+        existingState.status !== "failed" &&
+        existingState.status !== "missing_config"
+      ) {
+        return;
+      }
+
+      upsertPrivateRecognitionState(
+        createPrivateRecognitionState(
+          summary.conversationId,
+          replyMessage.id,
+          "recognizing"
+        )
+      );
+
+      recognizePrivateReplyArrangement({
+        conversationId: summary.conversationId,
+        conversationTitle: summary.title,
+        identity: summary.identity,
+        messages,
+        replyMessage,
+        settings: aiModelSettings,
+        existingState,
+      })
+        .then(upsertPrivateRecognitionState)
+        .catch((error: unknown) => {
+          upsertPrivateRecognitionState(
+            createPrivateRecognitionState(
+              summary.conversationId,
+              replyMessage.id,
+              "failed",
+              error instanceof Error ? error.message : t("privateChat.aiFailed")
+            )
+          );
+        });
+    },
+    [
+      aiModelSettings,
+      privateRecognitionStates,
+      t,
+      upsertPrivateRecognitionState,
+    ]
   );
 
   const createSelfRecord = React.useCallback((content: string) => {
@@ -1100,11 +1198,25 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     setTestMessages((prev) => {
       const nextMessages = [...prev, reply];
       persistTestMessages(nextMessages);
+      if (
+        summary.conversationType === "private" &&
+        aiModelSettings.autoRecognizePrivateReplies
+      ) {
+        runPrivateArrangementRecognition({
+          summary,
+          replyMessage: reply,
+          messages: nextMessages,
+        });
+      }
       return nextMessages;
     });
     markTestConversationAsRead(summary.conversationId);
     setTestConversationTargetUid(`test-${reply.id}`);
-  }, [markTestConversationAsRead]);
+  }, [
+    aiModelSettings.autoRecognizePrivateReplies,
+    markTestConversationAsRead,
+    runPrivateArrangementRecognition,
+  ]);
 
   const openSourceConversation = React.useCallback(
     (source: RecordSourceConversation) => {
@@ -1222,10 +1334,26 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         <TestIdentityConversationChat
           summary={activeTestConversationSummary}
           targetUid={testConversationTargetUid}
+          aiSettings={aiModelSettings}
+          recognitionStates={privateRecognitionStates}
           onBack={handleConversationBack}
           onOpenRecordDetail={setRecordDetail}
           onOpenRecordSnapshot={setRecordSnapshot}
           onCreateReply={(content) => createTestReply(activeTestConversationSummary, content)}
+          onRetryRecognition={(replyMessage) =>
+            runPrivateArrangementRecognition({
+              summary: activeTestConversationSummary,
+              replyMessage,
+              messages: testMessages,
+              force: true,
+            })
+          }
+          onOpenAiSettings={() => setSettingsView("ai")}
+          onOpenArrangement={(arrangementId) => {
+            setTargetArrangementId(arrangementId);
+            setShowTestConversation(false);
+            onNavigate("arrangements");
+          }}
         />
       );
     }
@@ -1268,6 +1396,14 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         <Arrangements
           targetArrangementId={targetArrangementId}
           onTargetHandled={() => setTargetArrangementId(null)}
+          onOpenSourceConversation={(conversationId, recordUid) => {
+            const returnContext: ConversationReturnContext = {
+              mode: "previous",
+              recordDetail: null,
+              recordSnapshot: null,
+            };
+            openTestConversation(conversationId, recordUid, returnContext);
+          }}
         />
       );
     }
@@ -2604,20 +2740,103 @@ function SelfRecognitionStatusView({
   return null;
 }
 
+function PrivateRecognitionStatusView({
+  state,
+  replyMessage,
+  onRetryRecognition,
+  onOpenArrangement,
+}: {
+  state?: PrivateArrangementRecognitionState;
+  replyMessage?: TestMessage;
+  onRetryRecognition: (replyMessage: TestMessage) => void;
+  onOpenArrangement: (arrangementId: string) => void;
+}) {
+  const { t } = usePreferences();
+
+  if (!state) return null;
+
+  if (state.status === "created" && state.createdArrangementId) {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <button
+          type="button"
+          onClick={() => onOpenArrangement(state.createdArrangementId!)}
+          className="max-w-[82%] rounded-[10px] border border-primary/20 bg-primary-soft px-3 py-2 text-left text-[12px] leading-4 text-primary transition active:scale-[0.99]"
+        >
+          {formatTemplate(t("privateChat.aiCreated"), {
+            title: state.createdArrangementTitle ?? t("arrangements.title"),
+          })}
+        </button>
+      </div>
+    );
+  }
+
+  if (state.status === "recognizing") {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <p className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-[12px] leading-4 text-text-tertiary">
+          {t("privateChat.aiRecognizing")}
+        </p>
+      </div>
+    );
+  }
+
+  if (
+    (state.status === "missing_config" || state.status === "failed") &&
+    replyMessage
+  ) {
+    return (
+      <div className="flex justify-end px-4 pb-1">
+        <div className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-right">
+          <p className="text-[12px] leading-4 text-text-tertiary">
+            {state.status === "missing_config"
+              ? t("privateChat.aiMissingConfig")
+              : t("privateChat.aiFailed")}
+          </p>
+          {state.errorMessage && (
+            <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-text-disabled">
+              {state.errorMessage}
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => onRetryRecognition(replyMessage)}
+            className="mt-1 text-[12px] font-medium leading-4 text-primary"
+          >
+            {t("sendToSelf.aiRetry")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 function TestIdentityConversationChat({
   summary,
   targetUid,
+  aiSettings,
+  recognitionStates,
   onBack,
   onOpenRecordDetail,
   onOpenRecordSnapshot,
   onCreateReply,
+  onRetryRecognition,
+  onOpenAiSettings,
+  onOpenArrangement,
 }: {
   summary: TestConversationSummary;
   targetUid?: string | null;
+  aiSettings: AiModelSettings;
+  recognitionStates: PrivateArrangementRecognitionState[];
   onBack: () => void;
   onOpenRecordDetail: (record: RecordItem) => void;
   onOpenRecordSnapshot: (record: RecordItem) => void;
   onCreateReply: (content: string) => void;
+  onRetryRecognition: (replyMessage: TestMessage) => void;
+  onOpenAiSettings: () => void;
+  onOpenArrangement: (arrangementId: string) => void;
 }) {
   const { resolvedLocale, t } = usePreferences();
   const candidateProfile = useCandidateProfile();
@@ -2627,6 +2846,22 @@ function TestIdentityConversationChat({
   const sortedRecords = React.useMemo(
     () => [...summary.records].sort((a, b) => a.send_at - b.send_at),
     [summary.records]
+  );
+  const recognitionStateByReplyId = React.useMemo(
+    () =>
+      new Map(
+        recognitionStates
+          .filter((state) => state.conversationId === summary.conversationId)
+          .map((state) => [state.replyMessageId, state])
+      ),
+    [recognitionStates, summary.conversationId]
+  );
+  const messageByRecordUid = React.useMemo(
+    () =>
+      new Map(
+        summary.messages.map((message) => [`test-${message.id}`, message])
+      ),
+    [summary.messages]
   );
 
   React.useLayoutEffect(() => {
@@ -2666,6 +2901,30 @@ function TestIdentityConversationChat({
           </div>
         </div>
       </header>
+
+      {summary.conversationType === "private" &&
+        aiSettings.autoRecognizePrivateReplies &&
+        !aiSettings.apiKey && (
+          <div className="shrink-0 bg-bg px-4 py-2">
+            <button
+              type="button"
+              onClick={onOpenAiSettings}
+              className="flex w-full items-center justify-between rounded-[12px] border border-border-light bg-surface px-3 py-2.5 text-left transition active:scale-[0.99]"
+            >
+              <span className="min-w-0">
+                <span className="block text-[13px] font-medium leading-5 text-text">
+                  {t("privateChat.aiSetupTitle")}
+                </span>
+                <span className="block text-[11px] leading-4 text-text-tertiary">
+                  {t("privateChat.aiSetupDesc")}
+                </span>
+              </span>
+              <span className="ml-3 shrink-0 text-[12px] font-medium text-primary">
+                {t("sendToSelf.aiSetupAction")}
+              </span>
+            </button>
+          </div>
+        )}
 
       <div
         ref={scrollContainerRef}
@@ -2716,6 +2975,12 @@ function TestIdentityConversationChat({
                       }
                       onOpenDetail={() => onOpenRecordDetail(record)}
                       onOpenMemorySnapshot={() => onOpenRecordSnapshot(record)}
+                    />
+                    <PrivateRecognitionStatusView
+                      state={recognitionStateByReplyId.get(record.uid.replace(/^test-/, ""))}
+                      replyMessage={messageByRecordUid.get(record.uid)}
+                      onRetryRecognition={onRetryRecognition}
+                      onOpenArrangement={onOpenArrangement}
                     />
                   </div>
                 ) : (
@@ -3444,7 +3709,7 @@ function AiModelSettingsScreen({
         </section>
 
         <section className="mt-3 rounded-[12px] bg-surface px-3 py-3">
-          <label className="flex items-center justify-between gap-3">
+          <label className="flex items-center justify-between gap-3 border-b border-border-light pb-3">
             <span className="min-w-0">
               <span className="block text-[15px] font-semibold leading-5 text-text">
                 {t("settings.aiAutoRecognize")}
@@ -3458,6 +3723,24 @@ function AiModelSettingsScreen({
               checked={draft.autoRecognizeSelfMessages}
               onChange={(event) =>
                 updateDraft("autoRecognizeSelfMessages", event.target.checked)
+              }
+              className="h-5 w-5 accent-[var(--color-primary)]"
+            />
+          </label>
+          <label className="mt-3 flex items-center justify-between gap-3">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold leading-5 text-text">
+                {t("settings.aiAutoRecognizePrivate")}
+              </span>
+              <span className="mt-1 block text-[12px] leading-5 text-text-tertiary">
+                {t("settings.aiAutoRecognizePrivateDesc")}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={draft.autoRecognizePrivateReplies}
+              onChange={(event) =>
+                updateDraft("autoRecognizePrivateReplies", event.target.checked)
               }
               className="h-5 w-5 accent-[var(--color-primary)]"
             />
