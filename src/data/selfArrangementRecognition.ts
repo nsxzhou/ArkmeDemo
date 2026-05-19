@@ -114,7 +114,7 @@ export async function recognizeSelfRecordArrangement({
         {
           role: "system",
           content:
-            "You extract future arrangements from a user's private note. Return only JSON. Do not invent facts. If there is no future arrangement, return hasArrangement false.",
+            "You extract future arrangements from a user's private note. Return only JSON. Do not invent facts. If there is no future arrangement, return hasArrangement false. Resolve relative dates with nowIso and timezone. For tomorrow, the day after tomorrow, Thursday, Zhou Si, and similar weekday phrases, use the nearest reasonable matching date unless the note explicitly says a farther date such as next Thursday. If a date is clear but the hour is not, set startAtIso to 00:00 in the provided timezone and keep the original phrase in timeText. If today is the named weekday and context cannot decide whether it means today or next week, leave startAtIso empty.",
         },
         {
           role: "user",
@@ -127,7 +127,8 @@ export async function recognizeSelfRecordArrangement({
               description: "string",
               timeKind: "none | deadline | time_range | fuzzy | recurring",
               timeText: "string",
-              startAtIso: "ISO datetime string when clear, otherwise empty",
+              startAtIso:
+                "ISO datetime string when the date is clear or inferable from nowIso and timezone, otherwise empty",
               location: "string",
               participants: ["string"],
               reminders: ["string"],

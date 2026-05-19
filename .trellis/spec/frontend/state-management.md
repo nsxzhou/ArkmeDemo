@@ -33,9 +33,18 @@ There is no server state in the current demo. The interview upload script is a N
 - Group-chat recognition uses `arkme-demo.arrangementRecognition.group` and deduplicates by `conversationId + replyMessageId`.
 - New arrangement recognition modules must expose `getInitial*States`, `persist*States`, `create*RecognitionState`, and `recognize*Arrangement` helpers so `Home.tsx` can keep UI state, retry behavior, and storage normalization consistent.
 
+## Arrangement Time Extraction Contract
+
+- Calendar placement depends on `ArrangementItem.time.startAt`; `time.originalText` is display-only and must not be treated as a schedulable date.
+- AI recognition prompts for send-to-self, private chat, and group chat must ask the model to resolve relative dates using `nowIso` and `timezone`.
+- Relative date phrases such as `明天`, `后天`, `星期四`, `周四`, and `下周四` should produce `startAtIso` when the date is inferable. If the phrase names a date but no hour, use `00:00` in the provided timezone.
+- Preserve the user-facing phrase in `timeText` / `time.originalText` even when `startAtIso` is produced.
+- If today is the named weekday and context cannot distinguish today from next week, leave `startAtIso` empty rather than guessing; the item will remain in the no-time list group.
+
 ## Common Mistakes
 
 - Treating `localStorage` data as trusted. Always normalize unknown values.
 - Introducing global state for a single page interaction.
 - Forgetting to dispatch or listen for `arkme-demo:test-conversations-updated` when test conversation data changes in the same tab.
 - Adding a new arrangement recognition localStorage key without a normalizer and a persistable-state mapper.
+- Assuming a visible `time.originalText` value means the item can appear in the calendar. Calendar grouping only uses `time.startAt`.

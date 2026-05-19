@@ -157,7 +157,7 @@ export async function recognizeGroupReplyArrangement({
         {
           role: "system",
           content:
-            "You detect whether the user has committed to a future arrangement in a group chat. Return only JSON. Only create a plan when the trigger reply makes the arrangement related to the user. Combine consecutive item additions such as A, B, and C into one arrangement. Do not create plans for other group members' tasks.",
+            "You detect whether the user has committed to a future arrangement in a group chat. Return only JSON. Only create a plan when the trigger reply makes the arrangement related to the user. Combine consecutive item additions such as A, B, and C into one arrangement. Do not create plans for other group members' tasks. Resolve relative dates with nowIso and timezone. For tomorrow, the day after tomorrow, Thursday, Zhou Si, and similar weekday phrases, use the nearest reasonable matching date unless the conversation explicitly says a farther date such as next Thursday. If a date is clear but the hour is not, set startAtIso to 00:00 in the provided timezone and keep the original phrase in timeText. If today is the named weekday and context cannot decide whether it means today or next week, leave startAtIso empty.",
         },
         {
           role: "user",
@@ -178,7 +178,8 @@ export async function recognizeGroupReplyArrangement({
               description: "string",
               timeKind: "none | deadline | time_range | fuzzy | recurring",
               timeText: "string",
-              startAtIso: "ISO datetime string when clear, otherwise empty",
+              startAtIso:
+                "ISO datetime string when the date is clear or inferable from nowIso and timezone, otherwise empty",
               location: "string",
               participants: ["string"],
               reminders: ["string"],
