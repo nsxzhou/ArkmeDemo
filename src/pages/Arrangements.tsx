@@ -32,6 +32,8 @@ type ArrangementGroup = {
   items: ArrangementItem[];
 };
 
+type ArrangementViewMode = "list" | "calendar";
+
 const timeKindOptions: ArrangementTimeKind[] = [
   "fuzzy",
   "deadline",
@@ -54,10 +56,18 @@ export default function Arrangements({
   const [editingArrangement, setEditingArrangement] = React.useState<ArrangementItem | null>(null);
   const [viewingArrangement, setViewingArrangement] = React.useState<ArrangementItem | null>(null);
   const [isEditorOpen, setIsEditorOpen] = React.useState(false);
+  const [viewMode, setViewMode] = React.useState<ArrangementViewMode>("list");
+  const [selectedCalendarDate, setSelectedCalendarDate] = React.useState(
+    createDayKey(Date.now())
+  );
 
   const groups = React.useMemo(
     () => getArrangementGroups(arrangements, t),
     [arrangements, t]
+  );
+  const reminderHighlights = React.useMemo(
+    () => getReminderHighlights(arrangements),
+    [arrangements]
   );
   const activeCount = arrangements.filter(
     (arrangement) =>
@@ -226,9 +236,37 @@ export default function Arrangements({
             value={arrangements.filter((arrangement) => arrangement.status === "later").length}
           />
         </div>
+
+        <div className="mt-3 grid grid-cols-2 rounded-[12px] bg-surface-muted p-1">
+          {(["list", "calendar"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                "h-9 rounded-[10px] text-[13px] font-medium leading-5 transition active:scale-[0.98]",
+                viewMode === mode
+                  ? "bg-surface text-text shadow-[0_2px_10px_rgba(15,23,42,0.08)]"
+                  : "text-text-tertiary"
+              )}
+            >
+              {mode === "list"
+                ? t("arrangements.viewList")
+                : t("arrangements.viewCalendar")}
+            </button>
+          ))}
+        </div>
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
+        {reminderHighlights.length > 0 && (
+          <ReminderHighlightPanel
+            reminders={reminderHighlights}
+            resolvedLocale={resolvedLocale}
+            onOpen={setViewingArrangement}
+          />
+        )}
+
         {demoCount > 0 && (
           <div className="mb-3 flex items-center justify-between rounded-[12px] border border-border-light bg-surface px-3 py-2.5">
             <div className="min-w-0">
@@ -253,6 +291,14 @@ export default function Arrangements({
           <ArrangementEmptyState
             onCreate={openCreateSheet}
             onRestoreDemo={restoreDemoArrangements}
+          />
+        ) : viewMode === "calendar" ? (
+          <ArrangementCalendarView
+            arrangements={arrangements}
+            selectedDate={selectedCalendarDate}
+            onSelectDate={setSelectedCalendarDate}
+            resolvedLocale={resolvedLocale}
+            onOpen={setViewingArrangement}
           />
         ) : (
           <div className="space-y-4">
@@ -295,6 +341,186 @@ export default function Arrangements({
         />
       )}
     </div>
+  );
+}
+
+function ReminderHighlightPanel({
+  reminders,
+  resolvedLocale,
+  onOpen,
+}: {
+  reminders: ArrangementItem[];
+  resolvedLocale: string;
+  onOpen: (arrangement: ArrangementItem) => void;
+}) {
+  const { t } = usePreferences();
+
+  return (
+    <section className="mb-3 rounded-[14px] border border-warning/30 bg-warning/10 px-3 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[13px] font-semibold leading-5 text-text">
+            {t("arrangements.reminderPanelTitle")}
+          </p>
+          <p className="text-[11px] leading-4 text-text-tertiary">
+            {t("arrangements.reminderPanelDesc")}
+          </p>
+        </div>
+        <span className="shrink-0 rounded-full bg-surface px-2 py-1 text-[11px] font-medium leading-4 text-warning">
+          {reminders.length}
+        </span>
+      </div>
+      <div className="mt-2 space-y-2">
+        {reminders.slice(0, 3).map((arrangement) => (
+          <button
+            key={arrangement.id}
+            type="button"
+            onClick={() => onOpen(arrangement)}
+            className="flex w-full items-center justify-between gap-3 rounded-[10px] bg-surface/85 px-3 py-2 text-left transition active:scale-[0.99]"
+          >
+            <span className="min-w-0">
+              <span className="block truncate text-[13px] font-medium leading-5 text-text">
+                {arrangement.title}
+              </span>
+              <span className="block text-[11px] leading-4 text-text-tertiary">
+                {formatReminderTime(arrangement, resolvedLocale, t)}
+              </span>
+            </span>
+            <span className="shrink-0 text-[12px] font-medium text-primary">
+              {t("arrangements.openReminder")}
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ArrangementCalendarView({
+  arrangements,
+  selectedDate,
+  onSelectDate,
+  resolvedLocale,
+  onOpen,
+}: {
+  arrangements: ArrangementItem[];
+  selectedDate: string;
+  onSelectDate: (dateKey: string) => void;
+  resolvedLocale: string;
+  onOpen: (arrangement: ArrangementItem) => void;
+}) {
+  const { t } = usePreferences();
+  const monthAnchor = React.useMemo(() => {
+    const [year, month] = selectedDate.split("-").map(Number);
+    return new Date(year, month - 1, 1);
+  }, [selectedDate]);
+  const calendarDays = React.useMemo(() => buildCalendarDays(monthAnchor), [monthAnchor]);
+  const arrangementsByDate = React.useMemo(() => {
+    const nextMap = new Map<string, ArrangementItem[]>();
+    arrangements
+      .filter((arrangement) => arrangement.time.startAt !== undefined)
+      .filter((arrangement) => arrangement.status !== "settled")
+      .forEach((arrangement) => {
+        const dateKey = createDayKey(arrangement.time.startAt!);
+        const items = nextMap.get(dateKey) ?? [];
+        items.push(arrangement);
+        nextMap.set(dateKey, items);
+      });
+    return nextMap;
+  }, [arrangements]);
+  const selectedItems = arrangementsByDate.get(selectedDate) ?? [];
+  const monthTitle = new Intl.DateTimeFormat(resolvedLocale, {
+    year: "numeric",
+    month: "long",
+  }).format(monthAnchor);
+
+  return (
+    <section className="space-y-3">
+      <div className="rounded-[16px] border border-border-light bg-surface px-3 py-3 shadow-[var(--mine-card-shadow)]">
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <p className="text-[15px] font-semibold leading-5 text-text">
+              {monthTitle}
+            </p>
+            <p className="text-[11px] leading-4 text-text-tertiary">
+              {t("arrangements.calendarDesc")}
+            </p>
+          </div>
+          <span className="rounded-full bg-primary-soft px-2.5 py-1 text-[11px] font-medium leading-4 text-primary">
+            {arrangementsByDate.size}
+          </span>
+        </div>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {getWeekdayLabels(resolvedLocale).map((label) => (
+            <span
+              key={label}
+              className="py-1 text-[10px] font-medium leading-4 text-text-tertiary"
+            >
+              {label}
+            </span>
+          ))}
+          {calendarDays.map((day) => {
+            const dateKey = createDayKey(day.getTime());
+            const items = arrangementsByDate.get(dateKey) ?? [];
+            const active = dateKey === selectedDate;
+            return (
+              <button
+                key={dateKey}
+                type="button"
+                onClick={() => onSelectDate(dateKey)}
+                className={cn(
+                  "relative flex aspect-square flex-col items-center justify-center rounded-[10px] text-[12px] font-medium leading-4 transition active:scale-[0.96]",
+                  day.getMonth() === monthAnchor.getMonth()
+                    ? "text-text"
+                    : "text-text-disabled",
+                  active ? "bg-primary text-on-primary" : "hover:bg-surface-muted"
+                )}
+              >
+                {day.getDate()}
+                {items.length > 0 && (
+                  <span
+                    className={cn(
+                      "mt-0.5 h-1.5 w-1.5 rounded-full",
+                      active ? "bg-on-primary" : "bg-primary"
+                    )}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <div className="px-1">
+          <h2 className="text-[15px] font-semibold leading-5 text-text">
+            {t("arrangements.calendarSelectedTitle")}
+          </h2>
+          <p className="text-[11px] leading-4 text-text-tertiary">
+            {formatSelectedDay(selectedDate, resolvedLocale)}
+          </p>
+        </div>
+        {selectedItems.length > 0 ? (
+          selectedItems.map((arrangement) => (
+            <ArrangementCard
+              key={arrangement.id}
+              arrangement={arrangement}
+              resolvedLocale={resolvedLocale}
+              onOpen={() => onOpen(arrangement)}
+            />
+          ))
+        ) : (
+          <div className="rounded-[14px] border border-dashed border-border-light bg-surface px-4 py-6 text-center">
+            <p className="text-[13px] font-medium leading-5 text-text">
+              {t("arrangements.calendarEmptyTitle")}
+            </p>
+            <p className="mt-1 text-[11px] leading-4 text-text-tertiary">
+              {t("arrangements.calendarEmptyDesc")}
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -573,6 +799,12 @@ function ArrangementEditorSheet({
             className="h-11 w-full rounded-[12px] bg-bg px-3 text-[14px] text-text outline-none focus-glow"
             placeholder={t("arrangements.fieldReminderPlaceholder")}
           />
+          <input
+            type="datetime-local"
+            value={draft.reminderAt}
+            onChange={(event) => updateDraft("reminderAt", event.target.value)}
+            className="mt-2 h-11 w-full rounded-[12px] bg-bg px-3 text-[13px] text-text outline-none focus-glow"
+          />
           <p className="mt-1 text-[11px] leading-4 text-text-tertiary">
             {t("arrangements.reminderNote")}
           </p>
@@ -689,7 +921,8 @@ function ArrangementDetailSheet({
             <div className="mt-2 space-y-2">
               {arrangement.contextRefs.map((contextRef, index) => {
                 const canOpenSource =
-                  contextRef.sourceType === "private_chat" &&
+                  (contextRef.sourceType === "private_chat" ||
+                    contextRef.sourceType === "group_chat") &&
                   Boolean(contextRef.conversationId) &&
                   Boolean(onOpenSourceConversation);
                 const content = (
@@ -942,6 +1175,80 @@ function formatArrangementTime(
     return arrangement.time.originalText ? `${arrangement.time.originalText} · ${dateText}` : dateText;
   }
   return arrangement.time.originalText ?? t("arrangements.noTime");
+}
+
+function formatReminderTime(
+  arrangement: ArrangementItem,
+  resolvedLocale: string,
+  t: ReturnType<typeof usePreferences>["t"]
+) {
+  const remindAt = arrangement.reminders[0]?.remindAt;
+  if (remindAt === undefined) return t("arrangements.reminderDisplayOnly");
+  return new Intl.DateTimeFormat(resolvedLocale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(remindAt));
+}
+
+function getReminderHighlights(arrangements: ArrangementItem[]) {
+  const now = Date.now();
+  const nextDay = now + 24 * 60 * 60 * 1000;
+  return arrangements
+    .filter(
+      (arrangement) =>
+        arrangement.status !== "completed" &&
+        arrangement.status !== "later" &&
+        arrangement.status !== "settled"
+    )
+    .filter((arrangement) => {
+      const remindAt = arrangement.reminders[0]?.remindAt;
+      return remindAt !== undefined && remindAt <= nextDay;
+    })
+    .sort(
+      (left, right) =>
+        (left.reminders[0]?.remindAt ?? Number.MAX_SAFE_INTEGER) -
+        (right.reminders[0]?.remindAt ?? Number.MAX_SAFE_INTEGER)
+    );
+}
+
+function createDayKey(timestamp: number) {
+  const date = new Date(timestamp);
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, "0");
+  const day = `${date.getDate()}`.padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildCalendarDays(monthAnchor: Date) {
+  const firstDay = new Date(monthAnchor.getFullYear(), monthAnchor.getMonth(), 1);
+  const startDay = new Date(firstDay);
+  startDay.setDate(firstDay.getDate() - firstDay.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(startDay);
+    date.setDate(startDay.getDate() + index);
+    return date;
+  });
+}
+
+function getWeekdayLabels(resolvedLocale: string) {
+  const baseDate = new Date(2026, 0, 4);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(baseDate);
+    date.setDate(baseDate.getDate() + index);
+    return new Intl.DateTimeFormat(resolvedLocale, { weekday: "short" }).format(date);
+  });
+}
+
+function formatSelectedDay(dateKey: string, resolvedLocale: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Intl.DateTimeFormat(resolvedLocale, {
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  }).format(new Date(year, month - 1, day));
 }
 
 function getStatusLabel(

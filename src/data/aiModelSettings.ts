@@ -4,6 +4,7 @@ export type AiModelSettings = {
   model: string;
   autoRecognizeSelfMessages: boolean;
   autoRecognizePrivateReplies: boolean;
+  autoRecognizeGroupReplies: boolean;
   autoDetectSimilarArrangements: boolean;
   autoCompleteHighConfidenceArrangements: boolean;
 };
@@ -16,6 +17,7 @@ export const defaultAiModelSettings: AiModelSettings = {
   model: "mimo-v2.5",
   autoRecognizeSelfMessages: true,
   autoRecognizePrivateReplies: true,
+  autoRecognizeGroupReplies: true,
   autoDetectSimilarArrangements: true,
   autoCompleteHighConfidenceArrangements: true,
 };
@@ -60,6 +62,10 @@ function normalizeAiModelSettings(value: unknown): AiModelSettings {
       typeof value.autoRecognizePrivateReplies === "boolean"
         ? value.autoRecognizePrivateReplies
         : defaultAiModelSettings.autoRecognizePrivateReplies,
+    autoRecognizeGroupReplies:
+      typeof value.autoRecognizeGroupReplies === "boolean"
+        ? value.autoRecognizeGroupReplies
+        : defaultAiModelSettings.autoRecognizeGroupReplies,
     autoDetectSimilarArrangements:
       typeof value.autoDetectSimilarArrangements === "boolean"
         ? value.autoDetectSimilarArrangements

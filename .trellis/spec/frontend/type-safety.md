@@ -33,6 +33,7 @@ Examples:
 
 - Use `Record<string, number>` for simple dictionary-like state such as `TestReadState`.
 - Use `Partial<T>` only after verifying an unknown value is an object.
+- When extending arrangement drafts or stored arrangement fields, update `src/types/arrangement.ts`, `createEmptyArrangementDraft`, `createDraftFromArrangement`, `createArrangementFromDraft`, `updateArrangementFromDraft`, and the relevant stored normalizer together. For example, `ArrangementDraft.reminderAt` must round-trip through `ArrangementReminder.remindAt` and `normalizeReminder`.
 
 ## Forbidden Patterns
 

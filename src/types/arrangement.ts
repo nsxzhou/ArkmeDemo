@@ -102,4 +102,5 @@ export type ArrangementDraft = {
   location: string;
   participantsText: string;
   reminderText: string;
+  reminderAt: string;
 };

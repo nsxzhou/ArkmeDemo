@@ -25,8 +25,17 @@ Keep feature-specific state local unless at least two independent surfaces need 
 
 There is no server state in the current demo. The interview upload script is a Node script under `scripts/`, not frontend server state.
 
+## Arrangement Recognition State
+
+- AI recognition state is local-only and stored under explicit `arkme-demo.*` keys.
+- Send-to-self recognition uses `arkme-demo.arrangementRecognition.self` and deduplicates by `recordUid`.
+- Private-chat recognition uses `arkme-demo.arrangementRecognition.private` and deduplicates by `conversationId + replyMessageId`.
+- Group-chat recognition uses `arkme-demo.arrangementRecognition.group` and deduplicates by `conversationId + replyMessageId`.
+- New arrangement recognition modules must expose `getInitial*States`, `persist*States`, `create*RecognitionState`, and `recognize*Arrangement` helpers so `Home.tsx` can keep UI state, retry behavior, and storage normalization consistent.
+
 ## Common Mistakes
 
 - Treating `localStorage` data as trusted. Always normalize unknown values.
 - Introducing global state for a single page interaction.
 - Forgetting to dispatch or listen for `arkme-demo:test-conversations-updated` when test conversation data changes in the same tab.
+- Adding a new arrangement recognition localStorage key without a normalizer and a persistable-state mapper.

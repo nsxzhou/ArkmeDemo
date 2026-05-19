@@ -146,6 +146,7 @@ export function createArrangementFromDraft(draft: ArrangementDraft) {
   const reminders = splitTextList(draft.reminderText).map((text, index) => ({
     id: `reminder-${now}-${index}`,
     text,
+    ...(index === 0 ? createReminderTimeFromDraft(draft) : {}),
   }));
 
   return {
@@ -174,6 +175,7 @@ export function createDraftFromArrangement(arrangement: ArrangementItem): Arrang
     location: arrangement.location ?? "",
     participantsText: arrangement.participants.map((participant) => participant.name).join("、"),
     reminderText: arrangement.reminders.map((reminder) => reminder.text).join("、"),
+    reminderAt: formatDateTimeInputValue(arrangement.reminders[0]?.remindAt),
   };
 }
 
@@ -195,6 +197,7 @@ export function updateArrangementFromDraft(
     reminders: splitTextList(draft.reminderText).map((text, index) => ({
       id: arrangement.reminders[index]?.id ?? `reminder-${now}-${index}`,
       text,
+      ...(index === 0 ? createReminderTimeFromDraft(draft) : {}),
     })),
     updatedAt: now,
   } satisfies ArrangementItem;
@@ -210,6 +213,7 @@ export function createEmptyArrangementDraft(): ArrangementDraft {
     location: "",
     participantsText: "",
     reminderText: "",
+    reminderAt: "",
   };
 }
 
@@ -235,6 +239,13 @@ function formatDateTimeInputValue(value: number | undefined) {
   if (!Number.isFinite(date.getTime())) return "";
   const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
   return offsetDate.toISOString().slice(0, 16);
+}
+
+function createReminderTimeFromDraft(draft: ArrangementDraft) {
+  const remindAt = draft.reminderAt ? new Date(draft.reminderAt).getTime() : undefined;
+  return typeof remindAt === "number" && Number.isFinite(remindAt)
+    ? { remindAt }
+    : {};
 }
 
 function normalizeArrangement(value: unknown): ArrangementItem | null {

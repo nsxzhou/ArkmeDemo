@@ -33,6 +33,13 @@ import {
   type PrivateArrangementRecognitionState,
 } from "@/data/privateArrangementRecognition";
 import {
+  createGroupRecognitionState,
+  getInitialGroupArrangementRecognitionStates,
+  persistGroupArrangementRecognitionStates,
+  recognizeGroupReplyArrangement,
+  type GroupArrangementRecognitionState,
+} from "@/data/groupArrangementRecognition";
+import {
   createTestReplyMessage,
   demoSenderIdentityId,
   getInitialTestGroups,
@@ -380,6 +387,9 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
   );
   const [privateRecognitionStates, setPrivateRecognitionStates] = React.useState(
     getInitialPrivateArrangementRecognitionStates
+  );
+  const [groupRecognitionStates, setGroupRecognitionStates] = React.useState(
+    getInitialGroupArrangementRecognitionStates
   );
   const [searchQuery, setSearchQuery] = React.useState("");
   const [searchHistory, setSearchHistory] = React.useState(getInitialSearchHistory);
@@ -828,6 +838,24 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     []
   );
 
+  const upsertGroupRecognitionState = React.useCallback(
+    (nextState: GroupArrangementRecognitionState) => {
+      setGroupRecognitionStates((prev) => {
+        const nextStates = [
+          ...prev.filter(
+            (state) =>
+              state.conversationId !== nextState.conversationId ||
+              state.replyMessageId !== nextState.replyMessageId
+          ),
+          nextState,
+        ];
+        persistGroupArrangementRecognitionStates(nextStates);
+        return nextStates;
+      });
+    },
+    []
+  );
+
   const runSelfArrangementRecognition = React.useCallback(
     (record: RecordItem) => {
       const existingState = selfRecognitionStates.find(
@@ -962,6 +990,94 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         source: {
           text: replyMessage.text,
           sourceType: "private_chat",
+          conversationId: replyMessage.conversationId,
+          messageId: `test-${replyMessage.id}`,
+        },
+      }).catch(() => undefined);
+    },
+    [aiModelSettings]
+  );
+
+  const runGroupArrangementRecognition = React.useCallback(
+    ({
+      summary,
+      replyMessage,
+      messages,
+      force = false,
+    }: {
+      summary: TestConversationSummary;
+      replyMessage: TestMessage;
+      messages: TestMessage[];
+      force?: boolean;
+    }) => {
+      if (summary.conversationType !== "group" || !summary.group) return;
+
+      const existingState = groupRecognitionStates.find(
+        (state) =>
+          state.conversationId === summary.conversationId &&
+          state.replyMessageId === replyMessage.id
+      );
+
+      if (
+        existingState &&
+        !force &&
+        existingState.status !== "failed" &&
+        existingState.status !== "missing_config"
+      ) {
+        return;
+      }
+
+      upsertGroupRecognitionState(
+        createGroupRecognitionState(
+          summary.conversationId,
+          replyMessage.id,
+          "recognizing"
+        )
+      );
+
+      recognizeGroupReplyArrangement({
+        group: summary.group,
+        identities: summary.memberIdentities,
+        messages,
+        replyMessage,
+        settings: aiModelSettings,
+        existingState,
+      })
+        .then((nextState) => {
+          upsertGroupRecognitionState(nextState);
+          if (nextState.createdArrangement) {
+            detectSimilarArrangementForCreatedItem({
+              createdArrangement: nextState.createdArrangement,
+              settings: aiModelSettings,
+            }).catch(() => undefined);
+          }
+        })
+        .catch((error: unknown) => {
+          upsertGroupRecognitionState(
+            createGroupRecognitionState(
+              summary.conversationId,
+              replyMessage.id,
+              "failed",
+              error instanceof Error ? error.message : t("groupChat.aiFailed")
+            )
+          );
+        });
+    },
+    [
+      aiModelSettings,
+      groupRecognitionStates,
+      t,
+      upsertGroupRecognitionState,
+    ]
+  );
+
+  const runGroupCompletionInference = React.useCallback(
+    (replyMessage: TestMessage) => {
+      inferCompletedArrangementFromSource({
+        settings: aiModelSettings,
+        source: {
+          text: replyMessage.text,
+          sourceType: "group_chat",
           conversationId: replyMessage.conversationId,
           messageId: `test-${replyMessage.id}`,
         },
@@ -1267,10 +1383,26 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         });
       }
       if (
+        summary.conversationType === "group" &&
+        aiModelSettings.autoRecognizeGroupReplies
+      ) {
+        runGroupArrangementRecognition({
+          summary,
+          replyMessage: reply,
+          messages: nextMessages,
+        });
+      }
+      if (
         summary.conversationType === "private" &&
         aiModelSettings.autoCompleteHighConfidenceArrangements
       ) {
         runPrivateCompletionInference(reply);
+      }
+      if (
+        summary.conversationType === "group" &&
+        aiModelSettings.autoCompleteHighConfidenceArrangements
+      ) {
+        runGroupCompletionInference(reply);
       }
       return nextMessages;
     });
@@ -1278,8 +1410,11 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     setTestConversationTargetUid(`test-${reply.id}`);
   }, [
     aiModelSettings.autoRecognizePrivateReplies,
+    aiModelSettings.autoRecognizeGroupReplies,
     aiModelSettings.autoCompleteHighConfidenceArrangements,
     markTestConversationAsRead,
+    runGroupArrangementRecognition,
+    runGroupCompletionInference,
     runPrivateCompletionInference,
     runPrivateArrangementRecognition,
   ]);
@@ -1401,13 +1536,22 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           summary={activeTestConversationSummary}
           targetUid={testConversationTargetUid}
           aiSettings={aiModelSettings}
-          recognitionStates={privateRecognitionStates}
+          privateRecognitionStates={privateRecognitionStates}
+          groupRecognitionStates={groupRecognitionStates}
           onBack={handleConversationBack}
           onOpenRecordDetail={setRecordDetail}
           onOpenRecordSnapshot={setRecordSnapshot}
           onCreateReply={(content) => createTestReply(activeTestConversationSummary, content)}
-          onRetryRecognition={(replyMessage) =>
+          onRetryPrivateRecognition={(replyMessage) =>
             runPrivateArrangementRecognition({
+              summary: activeTestConversationSummary,
+              replyMessage,
+              messages: testMessages,
+              force: true,
+            })
+          }
+          onRetryGroupRecognition={(replyMessage) =>
+            runGroupArrangementRecognition({
               summary: activeTestConversationSummary,
               replyMessage,
               messages: testMessages,
@@ -2806,16 +2950,18 @@ function SelfRecognitionStatusView({
   return null;
 }
 
-function PrivateRecognitionStatusView({
+function ArrangementRecognitionStatusView({
   state,
   replyMessage,
   onRetryRecognition,
   onOpenArrangement,
+  labelPrefix,
 }: {
-  state?: PrivateArrangementRecognitionState;
+  state?: PrivateArrangementRecognitionState | GroupArrangementRecognitionState;
   replyMessage?: TestMessage;
   onRetryRecognition: (replyMessage: TestMessage) => void;
   onOpenArrangement: (arrangementId: string) => void;
+  labelPrefix: "privateChat" | "groupChat";
 }) {
   const { t } = usePreferences();
 
@@ -2829,7 +2975,7 @@ function PrivateRecognitionStatusView({
           onClick={() => onOpenArrangement(state.createdArrangementId!)}
           className="max-w-[82%] rounded-[10px] border border-primary/20 bg-primary-soft px-3 py-2 text-left text-[12px] leading-4 text-primary transition active:scale-[0.99]"
         >
-          {formatTemplate(t("privateChat.aiCreated"), {
+          {formatTemplate(t(`${labelPrefix}.aiCreated`), {
             title: state.createdArrangementTitle ?? t("arrangements.title"),
           })}
         </button>
@@ -2841,7 +2987,7 @@ function PrivateRecognitionStatusView({
     return (
       <div className="flex justify-end px-4 pb-1">
         <p className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-[12px] leading-4 text-text-tertiary">
-          {t("privateChat.aiRecognizing")}
+          {t(`${labelPrefix}.aiRecognizing`)}
         </p>
       </div>
     );
@@ -2856,8 +3002,8 @@ function PrivateRecognitionStatusView({
         <div className="max-w-[82%] rounded-[10px] bg-surface-muted px-3 py-2 text-right">
           <p className="text-[12px] leading-4 text-text-tertiary">
             {state.status === "missing_config"
-              ? t("privateChat.aiMissingConfig")
-              : t("privateChat.aiFailed")}
+              ? t(`${labelPrefix}.aiMissingConfig`)
+              : t(`${labelPrefix}.aiFailed`)}
           </p>
           {state.errorMessage && (
             <p className="mt-0.5 line-clamp-2 text-[11px] leading-4 text-text-disabled">
@@ -2883,24 +3029,28 @@ function TestIdentityConversationChat({
   summary,
   targetUid,
   aiSettings,
-  recognitionStates,
+  privateRecognitionStates,
+  groupRecognitionStates,
   onBack,
   onOpenRecordDetail,
   onOpenRecordSnapshot,
   onCreateReply,
-  onRetryRecognition,
+  onRetryPrivateRecognition,
+  onRetryGroupRecognition,
   onOpenAiSettings,
   onOpenArrangement,
 }: {
   summary: TestConversationSummary;
   targetUid?: string | null;
   aiSettings: AiModelSettings;
-  recognitionStates: PrivateArrangementRecognitionState[];
+  privateRecognitionStates: PrivateArrangementRecognitionState[];
+  groupRecognitionStates: GroupArrangementRecognitionState[];
   onBack: () => void;
   onOpenRecordDetail: (record: RecordItem) => void;
   onOpenRecordSnapshot: (record: RecordItem) => void;
   onCreateReply: (content: string) => void;
-  onRetryRecognition: (replyMessage: TestMessage) => void;
+  onRetryPrivateRecognition: (replyMessage: TestMessage) => void;
+  onRetryGroupRecognition: (replyMessage: TestMessage) => void;
   onOpenAiSettings: () => void;
   onOpenArrangement: (arrangementId: string) => void;
 }) {
@@ -2913,14 +3063,23 @@ function TestIdentityConversationChat({
     () => [...summary.records].sort((a, b) => a.send_at - b.send_at),
     [summary.records]
   );
-  const recognitionStateByReplyId = React.useMemo(
+  const privateRecognitionStateByReplyId = React.useMemo(
     () =>
       new Map(
-        recognitionStates
+        privateRecognitionStates
           .filter((state) => state.conversationId === summary.conversationId)
           .map((state) => [state.replyMessageId, state])
       ),
-    [recognitionStates, summary.conversationId]
+    [privateRecognitionStates, summary.conversationId]
+  );
+  const groupRecognitionStateByReplyId = React.useMemo(
+    () =>
+      new Map(
+        groupRecognitionStates
+          .filter((state) => state.conversationId === summary.conversationId)
+          .map((state) => [state.replyMessageId, state])
+      ),
+    [groupRecognitionStates, summary.conversationId]
   );
   const messageByRecordUid = React.useMemo(
     () =>
@@ -2968,8 +3127,10 @@ function TestIdentityConversationChat({
         </div>
       </header>
 
-      {summary.conversationType === "private" &&
-        aiSettings.autoRecognizePrivateReplies &&
+      {((summary.conversationType === "private" &&
+        aiSettings.autoRecognizePrivateReplies) ||
+        (summary.conversationType === "group" &&
+          aiSettings.autoRecognizeGroupReplies)) &&
         !aiSettings.apiKey && (
           <div className="shrink-0 bg-bg px-4 py-2">
             <button
@@ -2979,10 +3140,14 @@ function TestIdentityConversationChat({
             >
               <span className="min-w-0">
                 <span className="block text-[13px] font-medium leading-5 text-text">
-                  {t("privateChat.aiSetupTitle")}
+                  {summary.conversationType === "group"
+                    ? t("groupChat.aiSetupTitle")
+                    : t("privateChat.aiSetupTitle")}
                 </span>
                 <span className="block text-[11px] leading-4 text-text-tertiary">
-                  {t("privateChat.aiSetupDesc")}
+                  {summary.conversationType === "group"
+                    ? t("groupChat.aiSetupDesc")
+                    : t("privateChat.aiSetupDesc")}
                 </span>
               </span>
               <span className="ml-3 shrink-0 text-[12px] font-medium text-primary">
@@ -3042,11 +3207,28 @@ function TestIdentityConversationChat({
                       onOpenDetail={() => onOpenRecordDetail(record)}
                       onOpenMemorySnapshot={() => onOpenRecordSnapshot(record)}
                     />
-                    <PrivateRecognitionStatusView
-                      state={recognitionStateByReplyId.get(record.uid.replace(/^test-/, ""))}
+                    <ArrangementRecognitionStatusView
+                      state={
+                        summary.conversationType === "group"
+                          ? groupRecognitionStateByReplyId.get(
+                              record.uid.replace(/^test-/, "")
+                            )
+                          : privateRecognitionStateByReplyId.get(
+                              record.uid.replace(/^test-/, "")
+                            )
+                      }
                       replyMessage={messageByRecordUid.get(record.uid)}
-                      onRetryRecognition={onRetryRecognition}
+                      onRetryRecognition={
+                        summary.conversationType === "group"
+                          ? onRetryGroupRecognition
+                          : onRetryPrivateRecognition
+                      }
                       onOpenArrangement={onOpenArrangement}
+                      labelPrefix={
+                        summary.conversationType === "group"
+                          ? "groupChat"
+                          : "privateChat"
+                      }
                     />
                   </div>
                 ) : (
@@ -3807,6 +3989,24 @@ function AiModelSettingsScreen({
               checked={draft.autoRecognizePrivateReplies}
               onChange={(event) =>
                 updateDraft("autoRecognizePrivateReplies", event.target.checked)
+              }
+              className="h-5 w-5 accent-[var(--color-primary)]"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3 border-b border-border-light py-3">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold leading-5 text-text">
+                {t("settings.aiAutoRecognizeGroup")}
+              </span>
+              <span className="mt-1 block text-[12px] leading-5 text-text-tertiary">
+                {t("settings.aiAutoRecognizeGroupDesc")}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={draft.autoRecognizeGroupReplies}
+              onChange={(event) =>
+                updateDraft("autoRecognizeGroupReplies", event.target.checked)
               }
               className="h-5 w-5 accent-[var(--color-primary)]"
             />
