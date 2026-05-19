@@ -1,7 +1,9 @@
 import type {
   ArrangementContextRef,
+  ArrangementCompletionEvidence,
   ArrangementDraft,
   ArrangementItem,
+  ArrangementMergeSuggestion,
   ArrangementParticipant,
   ArrangementReminder,
   ArrangementSourceType,
@@ -11,6 +13,7 @@ import type {
 } from "@/types/arrangement";
 
 export const arrangementsStorageKey = "arkme-demo.arrangements";
+export const arrangementsStorageEvent = "arkme-demo:arrangements-updated";
 
 const demoAnchor = new Date();
 demoAnchor.setHours(9, 0, 0, 0);
@@ -127,6 +130,7 @@ export function persistArrangements(arrangements: ArrangementItem[]) {
 
   try {
     window.localStorage.setItem(arrangementsStorageKey, JSON.stringify(arrangements));
+    window.dispatchEvent(new Event(arrangementsStorageEvent));
   } catch {
     // Keep the in-memory arrangements usable if storage is unavailable.
   }
@@ -253,6 +257,9 @@ function normalizeArrangement(value: unknown): ArrangementItem | null {
     participants: normalizeArray(value.participants, normalizeParticipant),
     reminders: normalizeArray(value.reminders, normalizeReminder),
     contextRefs: normalizeArray(value.contextRefs, normalizeContextRef),
+    ai: normalizeAiMeta(value.ai),
+    mergeSuggestion: normalizeMergeSuggestion(value.mergeSuggestion),
+    completionEvidence: normalizeCompletionEvidence(value.completionEvidence),
     createdAt,
     updatedAt,
     isDemo: value.isDemo === true,
@@ -310,6 +317,62 @@ function normalizeContextRef(value: unknown): ArrangementContextRef | null {
   };
 }
 
+function normalizeAiMeta(value: unknown): ArrangementItem["ai"] {
+  if (!isRecord(value)) return undefined;
+  const confidence = normalizeConfidence(value.confidence);
+  if (confidence === null) return undefined;
+  return {
+    provider: "openai-compatible",
+    model: normalizeOptionalText(value.model) ?? "",
+    confidence,
+    reason: normalizeOptionalText(value.reason),
+    needsUserConfirmation: value.needsUserConfirmation === true,
+  };
+}
+
+function normalizeMergeSuggestion(
+  value: unknown
+): ArrangementMergeSuggestion | undefined {
+  if (!isRecord(value)) return undefined;
+  const targetArrangementId = normalizeOptionalText(value.targetArrangementId);
+  const targetArrangementTitle = normalizeOptionalText(value.targetArrangementTitle);
+  const confidence = normalizeConfidence(value.confidence);
+  const createdAt = normalizeTimestamp(value.createdAt);
+  if (!targetArrangementId || !targetArrangementTitle || confidence === null) {
+    return undefined;
+  }
+
+  return {
+    targetArrangementId,
+    targetArrangementTitle,
+    confidence,
+    reason: normalizeOptionalText(value.reason),
+    createdAt: createdAt ?? Date.now(),
+  };
+}
+
+function normalizeCompletionEvidence(
+  value: unknown
+): ArrangementCompletionEvidence | undefined {
+  if (!isRecord(value)) return undefined;
+  const confidence = normalizeConfidence(value.confidence);
+  const sourceText = normalizeOptionalText(value.sourceText);
+  const detectedAt = normalizeTimestamp(value.detectedAt);
+  if (confidence === null || !sourceText || detectedAt === null) return undefined;
+
+  return {
+    model: normalizeOptionalText(value.model) ?? "",
+    confidence,
+    reason: normalizeOptionalText(value.reason),
+    sourceText,
+    sourceType: normalizeContextSourceType(value.sourceType),
+    conversationId: normalizeOptionalText(value.conversationId),
+    messageId: normalizeOptionalText(value.messageId),
+    detectedAt,
+    previousStatus: normalizeStatus(value.previousStatus),
+  };
+}
+
 function normalizeArray<T>(value: unknown, normalize: (item: unknown) => T | null) {
   if (!Array.isArray(value)) return [];
   return value.map(normalize).filter((item): item is T => Boolean(item));
@@ -364,6 +427,11 @@ function normalizeTimeKind(value: unknown): ArrangementTimeKind {
 function normalizeTimestamp(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value;
+}
+
+function normalizeConfidence(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(1, Math.max(0, value));
 }
 
 function normalizeOptionalText(value: unknown) {

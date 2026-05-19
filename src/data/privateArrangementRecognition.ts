@@ -25,6 +25,7 @@ export type PrivateArrangementRecognitionState = {
   status: PrivateArrangementRecognitionStatus;
   createdArrangementId?: string;
   createdArrangementTitle?: string;
+  createdArrangement?: ArrangementItem;
   errorMessage?: string;
   updatedAt: number;
 };
@@ -130,6 +131,7 @@ export async function recognizePrivateReplyArrangement({
       status: "created",
       createdArrangementId: existingArrangement.id,
       createdArrangementTitle: existingArrangement.title,
+      createdArrangement: existingArrangement,
       updatedAt: Date.now(),
     } satisfies PrivateArrangementRecognitionState;
   }
@@ -238,6 +240,7 @@ export async function recognizePrivateReplyArrangement({
     status: "created",
     createdArrangementId: arrangement.id,
     createdArrangementTitle: arrangement.title,
+    createdArrangement: arrangement,
     updatedAt: Date.now(),
   } satisfies PrivateArrangementRecognitionState;
 }

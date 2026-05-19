@@ -4,6 +4,7 @@ import {
   createDraftFromArrangement,
   createEmptyArrangementDraft,
   demoArrangements,
+  arrangementsStorageEvent,
   getInitialArrangements,
   isArrangementOverdue,
   isArrangementToday,
@@ -11,6 +12,10 @@ import {
   persistArrangements,
   updateArrangementFromDraft,
 } from "@/data/arrangements";
+import {
+  mergeArrangementIntoSuggestedTarget,
+  restoreArrangementFromCompletionEvidence,
+} from "@/data/arrangementContinuity";
 import { cn } from "@/lib/utils";
 import { usePreferences } from "@/settings/preferences";
 import type {
@@ -66,6 +71,26 @@ export default function Arrangements({
   }, []);
 
   React.useEffect(() => {
+    const refreshArrangements = () => {
+      const nextArrangements = getInitialArrangements();
+      setArrangements(nextArrangements);
+      setViewingArrangement((currentArrangement) =>
+        currentArrangement
+          ? nextArrangements.find(
+              (arrangement) => arrangement.id === currentArrangement.id
+            ) ?? currentArrangement
+          : null
+      );
+    };
+    window.addEventListener(arrangementsStorageEvent, refreshArrangements);
+    window.addEventListener("storage", refreshArrangements);
+    return () => {
+      window.removeEventListener(arrangementsStorageEvent, refreshArrangements);
+      window.removeEventListener("storage", refreshArrangements);
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (!targetArrangementId) return;
     const targetArrangement = arrangements.find(
       (arrangement) => arrangement.id === targetArrangementId
@@ -114,6 +139,35 @@ export default function Arrangements({
       };
       nextViewingArrangement = updatedArrangement;
       return updatedArrangement;
+    });
+    replaceArrangements(nextArrangements);
+    setViewingArrangement(nextViewingArrangement);
+  };
+
+  const mergeSuggestedArrangement = (arrangementId: string) => {
+    const nextArrangements = mergeArrangementIntoSuggestedTarget(
+      arrangements,
+      arrangementId
+    );
+    replaceArrangements(nextArrangements);
+    const mergedSource = arrangements.find(
+      (arrangement) => arrangement.id === arrangementId
+    );
+    const targetArrangement = nextArrangements.find(
+      (arrangement) =>
+        arrangement.id === mergedSource?.mergeSuggestion?.targetArrangementId ||
+        arrangement.id === arrangementId
+    );
+    setViewingArrangement(targetArrangement ?? null);
+  };
+
+  const restoreFromAiCompletion = (arrangementId: string) => {
+    let nextViewingArrangement: ArrangementItem | null = null;
+    const nextArrangements = arrangements.map((arrangement) => {
+      if (arrangement.id !== arrangementId) return arrangement;
+      const restoredArrangement = restoreArrangementFromCompletionEvidence(arrangement);
+      nextViewingArrangement = restoredArrangement;
+      return restoredArrangement;
     });
     replaceArrangements(nextArrangements);
     setViewingArrangement(nextViewingArrangement);
@@ -234,6 +288,8 @@ export default function Arrangements({
           onComplete={() => updateArrangementStatus(viewingArrangement.id, "completed")}
           onLater={() => updateArrangementStatus(viewingArrangement.id, "later")}
           onRestore={() => updateArrangementStatus(viewingArrangement.id, "pending")}
+          onMergeSuggested={() => mergeSuggestedArrangement(viewingArrangement.id)}
+          onRestoreCompletion={() => restoreFromAiCompletion(viewingArrangement.id)}
           onDelete={() => deleteArrangement(viewingArrangement.id)}
           onOpenSourceConversation={onOpenSourceConversation}
         />
@@ -551,6 +607,8 @@ function ArrangementDetailSheet({
   onComplete,
   onLater,
   onRestore,
+  onMergeSuggested,
+  onRestoreCompletion,
   onDelete,
   onOpenSourceConversation,
 }: {
@@ -561,6 +619,8 @@ function ArrangementDetailSheet({
   onComplete: () => void;
   onLater: () => void;
   onRestore: () => void;
+  onMergeSuggested: () => void;
+  onRestoreCompletion: () => void;
   onDelete: () => void;
   onOpenSourceConversation?: (conversationId: string, recordUid?: string) => void;
 }) {
@@ -677,6 +737,65 @@ function ArrangementDetailSheet({
           )}
         </section>
 
+        {arrangement.mergeSuggestion && (
+          <section className="mt-4 rounded-[14px] border border-primary/20 bg-primary-soft px-3 py-3">
+            <h3 className="text-[13px] font-semibold leading-5 text-text">
+              {t("arrangements.mergeSuggestionTitle")}
+            </h3>
+            <p className="mt-1 text-[12px] leading-5 text-text-muted">
+              {formatTemplate(t("arrangements.mergeSuggestionDesc"), {
+                title: arrangement.mergeSuggestion.targetArrangementTitle,
+              })}
+            </p>
+            {arrangement.mergeSuggestion.reason && (
+              <p className="mt-2 rounded-[10px] bg-surface/70 px-3 py-2 text-[12px] leading-5 text-text-muted">
+                {arrangement.mergeSuggestion.reason}
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={onMergeSuggested}
+              className="mt-3 min-h-[38px] w-full rounded-[12px] bg-primary px-3 text-[13px] font-medium leading-5 text-on-primary transition active:scale-[0.98]"
+            >
+              {t("arrangements.mergeSuggestionAction")}
+            </button>
+          </section>
+        )}
+
+        {arrangement.completionEvidence && (
+          <section className="mt-4 rounded-[14px] border border-border-light bg-bg px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold leading-5 text-text">
+                  {t("arrangements.completionEvidenceTitle")}
+                </h3>
+                <p className="mt-1 text-[12px] leading-5 text-text-muted">
+                  {formatTemplate(t("arrangements.completionEvidenceDesc"), {
+                    confidence: `${Math.round(
+                      arrangement.completionEvidence.confidence * 100
+                    )}%`,
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onRestoreCompletion}
+                className="shrink-0 rounded-full bg-surface px-3 py-1.5 text-[12px] font-medium leading-4 text-primary transition active:scale-[0.98]"
+              >
+                {t("arrangements.completionEvidenceUndo")}
+              </button>
+            </div>
+            <p className="mt-2 rounded-[10px] bg-surface-muted px-3 py-2 text-[12px] leading-5 text-text-muted">
+              {arrangement.completionEvidence.sourceText}
+            </p>
+            {arrangement.completionEvidence.reason && (
+              <p className="mt-1 text-[11px] leading-4 text-text-tertiary">
+                {arrangement.completionEvidence.reason}
+              </p>
+            )}
+          </section>
+        )}
+
         <div className="mt-4 grid grid-cols-2 gap-2">
           {arrangement.status !== "completed" && (
             <ActionButton label={t("arrangements.actionComplete")} onClick={onComplete} primary />
@@ -725,6 +844,10 @@ function ActionButton({
       {label}
     </button>
   );
+}
+
+function formatTemplate(template: string, values: Record<string, string>) {
+  return template.replace(/\{(\w+)\}/g, (match, key) => values[key] ?? match);
 }
 
 function SheetFrame({

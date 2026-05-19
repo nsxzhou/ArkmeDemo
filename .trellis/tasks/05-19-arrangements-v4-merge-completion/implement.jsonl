@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend package entrypoint and pre-development checklist for V4 implementation."}
+{"file": ".trellis/spec/frontend/codex-answer-standard.md", "reason": "Candidate logging, verification, and final test-link rules required for every implementation round."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Required verification and localStorage/code quality rules for the V4 cross-layer change."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Runtime normalization and strict TypeScript guidance for new arrangement metadata."}

@@ -4,6 +4,8 @@ export type AiModelSettings = {
   model: string;
   autoRecognizeSelfMessages: boolean;
   autoRecognizePrivateReplies: boolean;
+  autoDetectSimilarArrangements: boolean;
+  autoCompleteHighConfidenceArrangements: boolean;
 };
 
 export const aiModelSettingsStorageKey = "arkme-demo.aiModelSettings";
@@ -14,6 +16,8 @@ export const defaultAiModelSettings: AiModelSettings = {
   model: "mimo-v2.5",
   autoRecognizeSelfMessages: true,
   autoRecognizePrivateReplies: true,
+  autoDetectSimilarArrangements: true,
+  autoCompleteHighConfidenceArrangements: true,
 };
 
 export function getInitialAiModelSettings() {
@@ -56,6 +60,14 @@ function normalizeAiModelSettings(value: unknown): AiModelSettings {
       typeof value.autoRecognizePrivateReplies === "boolean"
         ? value.autoRecognizePrivateReplies
         : defaultAiModelSettings.autoRecognizePrivateReplies,
+    autoDetectSimilarArrangements:
+      typeof value.autoDetectSimilarArrangements === "boolean"
+        ? value.autoDetectSimilarArrangements
+        : defaultAiModelSettings.autoDetectSimilarArrangements,
+    autoCompleteHighConfidenceArrangements:
+      typeof value.autoCompleteHighConfidenceArrangements === "boolean"
+        ? value.autoCompleteHighConfidenceArrangements
+        : defaultAiModelSettings.autoCompleteHighConfidenceArrangements,
   };
 }
 

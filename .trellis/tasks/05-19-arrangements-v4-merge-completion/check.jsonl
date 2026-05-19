@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend package checklist for reviewing V4 implementation scope."}
+{"file": ".trellis/spec/frontend/codex-answer-standard.md", "reason": "Ensures candidate log, UI data log, verification, and final links are complete."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Checklist for lint/build/verify and avoiding generated artifact churn."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Review storage normalization, unions, and parsed model responses."}

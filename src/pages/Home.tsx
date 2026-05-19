@@ -13,6 +13,10 @@ import {
   persistAiModelSettings,
   type AiModelSettings,
 } from "@/data/aiModelSettings";
+import {
+  detectSimilarArrangementForCreatedItem,
+  inferCompletedArrangementFromSource,
+} from "@/data/arrangementContinuity";
 import { useCandidateProfile } from "@/data/candidateProfile";
 import {
   createRecognitionState,
@@ -840,7 +844,15 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         settings: aiModelSettings,
         existingState,
       })
-        .then(upsertSelfRecognitionState)
+        .then((nextState) => {
+          upsertSelfRecognitionState(nextState);
+          if (nextState.createdArrangement) {
+            detectSimilarArrangementForCreatedItem({
+              createdArrangement: nextState.createdArrangement,
+              settings: aiModelSettings,
+            }).catch(() => undefined);
+          }
+        })
         .catch((error: unknown) => {
           upsertSelfRecognitionState(
             createRecognitionState(
@@ -852,6 +864,21 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         });
     },
     [aiModelSettings, selfRecognitionStates, t, upsertSelfRecognitionState]
+  );
+
+  const runSelfCompletionInference = React.useCallback(
+    (record: RecordItem) => {
+      inferCompletedArrangementFromSource({
+        settings: aiModelSettings,
+        source: {
+          text: record.text_content,
+          sourceType: "self",
+          conversationId: "send-to-self",
+          messageId: record.uid,
+        },
+      }).catch(() => undefined);
+    },
+    [aiModelSettings]
   );
 
   const runPrivateArrangementRecognition = React.useCallback(
@@ -900,7 +927,15 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
         settings: aiModelSettings,
         existingState,
       })
-        .then(upsertPrivateRecognitionState)
+        .then((nextState) => {
+          upsertPrivateRecognitionState(nextState);
+          if (nextState.createdArrangement) {
+            detectSimilarArrangementForCreatedItem({
+              createdArrangement: nextState.createdArrangement,
+              settings: aiModelSettings,
+            }).catch(() => undefined);
+          }
+        })
         .catch((error: unknown) => {
           upsertPrivateRecognitionState(
             createPrivateRecognitionState(
@@ -918,6 +953,21 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
       t,
       upsertPrivateRecognitionState,
     ]
+  );
+
+  const runPrivateCompletionInference = React.useCallback(
+    (replyMessage: TestMessage) => {
+      inferCompletedArrangementFromSource({
+        settings: aiModelSettings,
+        source: {
+          text: replyMessage.text,
+          sourceType: "private_chat",
+          conversationId: replyMessage.conversationId,
+          messageId: `test-${replyMessage.id}`,
+        },
+      }).catch(() => undefined);
+    },
+    [aiModelSettings]
   );
 
   const createSelfRecord = React.useCallback((content: string) => {
@@ -939,7 +989,15 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
     if (aiModelSettings.autoRecognizeSelfMessages) {
       runSelfArrangementRecognition(nextRecord);
     }
-  }, [aiModelSettings.autoRecognizeSelfMessages, runSelfArrangementRecognition]);
+    if (aiModelSettings.autoCompleteHighConfidenceArrangements) {
+      runSelfCompletionInference(nextRecord);
+    }
+  }, [
+    aiModelSettings.autoCompleteHighConfidenceArrangements,
+    aiModelSettings.autoRecognizeSelfMessages,
+    runSelfArrangementRecognition,
+    runSelfCompletionInference,
+  ]);
 
   const createRecordExtension = React.useCallback((parentRecord: RecordItem, content: string) => {
     const timestamp = Date.now();
@@ -1208,13 +1266,21 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           messages: nextMessages,
         });
       }
+      if (
+        summary.conversationType === "private" &&
+        aiModelSettings.autoCompleteHighConfidenceArrangements
+      ) {
+        runPrivateCompletionInference(reply);
+      }
       return nextMessages;
     });
     markTestConversationAsRead(summary.conversationId);
     setTestConversationTargetUid(`test-${reply.id}`);
   }, [
     aiModelSettings.autoRecognizePrivateReplies,
+    aiModelSettings.autoCompleteHighConfidenceArrangements,
     markTestConversationAsRead,
+    runPrivateCompletionInference,
     runPrivateArrangementRecognition,
   ]);
 
@@ -3727,7 +3793,7 @@ function AiModelSettingsScreen({
               className="h-5 w-5 accent-[var(--color-primary)]"
             />
           </label>
-          <label className="mt-3 flex items-center justify-between gap-3">
+          <label className="flex items-center justify-between gap-3 border-b border-border-light py-3">
             <span className="min-w-0">
               <span className="block text-[15px] font-semibold leading-5 text-text">
                 {t("settings.aiAutoRecognizePrivate")}
@@ -3741,6 +3807,45 @@ function AiModelSettingsScreen({
               checked={draft.autoRecognizePrivateReplies}
               onChange={(event) =>
                 updateDraft("autoRecognizePrivateReplies", event.target.checked)
+              }
+              className="h-5 w-5 accent-[var(--color-primary)]"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3 border-b border-border-light py-3">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold leading-5 text-text">
+                {t("settings.aiAutoDetectSimilar")}
+              </span>
+              <span className="mt-1 block text-[12px] leading-5 text-text-tertiary">
+                {t("settings.aiAutoDetectSimilarDesc")}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={draft.autoDetectSimilarArrangements}
+              onChange={(event) =>
+                updateDraft("autoDetectSimilarArrangements", event.target.checked)
+              }
+              className="h-5 w-5 accent-[var(--color-primary)]"
+            />
+          </label>
+          <label className="flex items-center justify-between gap-3 pt-3">
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold leading-5 text-text">
+                {t("settings.aiAutoCompleteHighConfidence")}
+              </span>
+              <span className="mt-1 block text-[12px] leading-5 text-text-tertiary">
+                {t("settings.aiAutoCompleteHighConfidenceDesc")}
+              </span>
+            </span>
+            <input
+              type="checkbox"
+              checked={draft.autoCompleteHighConfidenceArrangements}
+              onChange={(event) =>
+                updateDraft(
+                  "autoCompleteHighConfidenceArrangements",
+                  event.target.checked
+                )
               }
               className="h-5 w-5 accent-[var(--color-primary)]"
             />

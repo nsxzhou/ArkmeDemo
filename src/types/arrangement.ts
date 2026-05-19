@@ -54,6 +54,26 @@ export type ArrangementAiMeta = {
   needsUserConfirmation: boolean;
 };
 
+export type ArrangementMergeSuggestion = {
+  targetArrangementId: string;
+  targetArrangementTitle: string;
+  confidence: number;
+  reason?: string;
+  createdAt: number;
+};
+
+export type ArrangementCompletionEvidence = {
+  model: string;
+  confidence: number;
+  reason?: string;
+  sourceText: string;
+  sourceType: ArrangementContextRef["sourceType"];
+  conversationId?: string;
+  messageId?: string;
+  detectedAt: number;
+  previousStatus: ArrangementStatus;
+};
+
 export type ArrangementItem = {
   id: string;
   title: string;
@@ -66,6 +86,8 @@ export type ArrangementItem = {
   reminders: ArrangementReminder[];
   contextRefs: ArrangementContextRef[];
   ai?: ArrangementAiMeta;
+  mergeSuggestion?: ArrangementMergeSuggestion;
+  completionEvidence?: ArrangementCompletionEvidence;
   createdAt: number;
   updatedAt: number;
   isDemo?: boolean;

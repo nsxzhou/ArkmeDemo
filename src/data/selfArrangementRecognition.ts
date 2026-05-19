@@ -22,6 +22,7 @@ export type SelfArrangementRecognitionState = {
   status: SelfArrangementRecognitionStatus;
   createdArrangementId?: string;
   createdArrangementTitle?: string;
+  createdArrangement?: ArrangementItem;
   errorMessage?: string;
   updatedAt: number;
 };
@@ -164,6 +165,7 @@ export async function recognizeSelfRecordArrangement({
     status: "created",
     createdArrangementId: arrangement.id,
     createdArrangementTitle: arrangement.title,
+    createdArrangement: arrangement,
     updatedAt: Date.now(),
   } satisfies SelfArrangementRecognitionState;
 }

@@ -1,0 +1,388 @@
+import {
+  getInitialArrangements,
+  persistArrangements,
+} from "@/data/arrangements";
+import type { AiModelSettings } from "@/data/aiModelSettings";
+import type {
+  ArrangementCompletionEvidence,
+  ArrangementContextRef,
+  ArrangementItem,
+  ArrangementMergeSuggestion,
+  ArrangementParticipant,
+  ArrangementReminder,
+} from "@/types/arrangement";
+
+type ChatCompletionResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string;
+    };
+  }>;
+};
+
+type SimilarArrangementResult = {
+  hasSimilarArrangement: boolean;
+  targetArrangementId?: string;
+  confidence?: number;
+  reason?: string;
+};
+
+type CompletionInferenceResult = {
+  hasCompletedArrangement: boolean;
+  arrangementId?: string;
+  confidence?: number;
+  reason?: string;
+};
+
+export type ArrangementContinuitySource = {
+  text: string;
+  sourceType: ArrangementContextRef["sourceType"];
+  conversationId?: string;
+  messageId?: string;
+};
+
+const mergeSuggestionConfidenceThreshold = 0.78;
+const completionConfidenceThreshold = 0.9;
+
+export async function detectSimilarArrangementForCreatedItem({
+  createdArrangement,
+  settings,
+}: {
+  createdArrangement: ArrangementItem;
+  settings: AiModelSettings;
+}) {
+  if (!settings.autoDetectSimilarArrangements || !settings.apiKey.trim()) return null;
+
+  const arrangements = getInitialArrangements();
+  const candidates = arrangements
+    .filter((arrangement) => arrangement.id !== createdArrangement.id)
+    .filter(isMergeCandidate)
+    .slice(0, 8);
+
+  if (candidates.length === 0) return null;
+
+  const result = await requestJsonCompletion<SimilarArrangementResult>({
+    settings,
+    system:
+      "You detect whether a newly created future arrangement is the same real-world matter as one existing arrangement. Return only JSON. Prefer false unless they clearly refer to the same task, appointment, errand, or commitment.",
+    payload: {
+      nowIso: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      requiredJsonShape: {
+        hasSimilarArrangement: "boolean",
+        targetArrangementId: "string id from candidates, empty when none",
+        confidence: "number from 0 to 1",
+        reason: "short string",
+      },
+      newArrangement: summarizeArrangement(createdArrangement),
+      candidates: candidates.map(summarizeArrangement),
+    },
+  });
+
+  const targetArrangement = candidates.find(
+    (arrangement) => arrangement.id === normalizeText(result.targetArrangementId)
+  );
+  const confidence = normalizeConfidence(result.confidence);
+  if (
+    !result.hasSimilarArrangement ||
+    !targetArrangement ||
+    confidence < mergeSuggestionConfidenceThreshold
+  ) {
+    return null;
+  }
+
+  const suggestion: ArrangementMergeSuggestion = {
+    targetArrangementId: targetArrangement.id,
+    targetArrangementTitle: targetArrangement.title,
+    confidence,
+    reason: normalizeText(result.reason),
+    createdAt: Date.now(),
+  };
+
+  const nextArrangements = getInitialArrangements().map((arrangement) =>
+    arrangement.id === createdArrangement.id
+      ? { ...arrangement, mergeSuggestion: suggestion, updatedAt: Date.now() }
+      : arrangement
+  );
+  persistArrangements(nextArrangements);
+
+  return suggestion;
+}
+
+export async function inferCompletedArrangementFromSource({
+  source,
+  settings,
+}: {
+  source: ArrangementContinuitySource;
+  settings: AiModelSettings;
+}) {
+  if (!settings.autoCompleteHighConfidenceArrangements || !settings.apiKey.trim()) {
+    return null;
+  }
+
+  const arrangements = getInitialArrangements().filter(isCompletionCandidate).slice(0, 10);
+  if (arrangements.length === 0) return null;
+
+  const result = await requestJsonCompletion<CompletionInferenceResult>({
+    settings,
+    system:
+      "You detect whether a new user message explicitly says that one existing future arrangement has already been completed. Return only JSON. Only mark complete for clear past-tense completion evidence, not rescheduling, intent, acknowledgement, or vague progress.",
+    payload: {
+      nowIso: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      requiredJsonShape: {
+        hasCompletedArrangement: "boolean",
+        arrangementId: "string id from candidates, empty when none",
+        confidence: "number from 0 to 1",
+        reason: "short string",
+      },
+      source,
+      candidates: arrangements.map(summarizeArrangement),
+    },
+  });
+
+  const targetArrangement = arrangements.find(
+    (arrangement) => arrangement.id === normalizeText(result.arrangementId)
+  );
+  const confidence = normalizeConfidence(result.confidence);
+  if (
+    !result.hasCompletedArrangement ||
+    !targetArrangement ||
+    confidence < completionConfidenceThreshold
+  ) {
+    return null;
+  }
+
+  const evidence: ArrangementCompletionEvidence = {
+    model: settings.model,
+    confidence,
+    reason: normalizeText(result.reason),
+    sourceText: source.text,
+    sourceType: source.sourceType,
+    conversationId: source.conversationId,
+    messageId: source.messageId,
+    detectedAt: Date.now(),
+    previousStatus: targetArrangement.status,
+  };
+
+  const nextArrangements = getInitialArrangements().map((arrangement) =>
+    arrangement.id === targetArrangement.id
+      ? ({
+          ...arrangement,
+          status: "completed",
+          completionEvidence: evidence,
+          updatedAt: Date.now(),
+        } satisfies ArrangementItem)
+      : arrangement
+  );
+  persistArrangements(nextArrangements);
+
+  return {
+    arrangementId: targetArrangement.id,
+    arrangementTitle: targetArrangement.title,
+    evidence,
+  };
+}
+
+export function mergeArrangementIntoSuggestedTarget(
+  arrangements: ArrangementItem[],
+  sourceArrangementId: string
+) {
+  const sourceArrangement = arrangements.find(
+    (arrangement) => arrangement.id === sourceArrangementId
+  );
+  const targetArrangement = arrangements.find(
+    (arrangement) =>
+      arrangement.id === sourceArrangement?.mergeSuggestion?.targetArrangementId
+  );
+  if (!sourceArrangement || !targetArrangement) return arrangements;
+
+  const [primaryArrangement, secondaryArrangement] =
+    targetArrangement.createdAt <= sourceArrangement.createdAt
+      ? [targetArrangement, sourceArrangement]
+      : [sourceArrangement, targetArrangement];
+  const now = Date.now();
+  const mergedArrangement: ArrangementItem = {
+    ...primaryArrangement,
+    description: primaryArrangement.description || secondaryArrangement.description,
+    location: primaryArrangement.location || secondaryArrangement.location,
+    participants: mergeNamedItems(
+      primaryArrangement.participants,
+      secondaryArrangement.participants,
+      "participant",
+      primaryArrangement.id,
+      now
+    ),
+    reminders: mergeTextItems(
+      primaryArrangement.reminders,
+      secondaryArrangement.reminders,
+      "reminder",
+      primaryArrangement.id,
+      now
+    ),
+    contextRefs: mergeContextRefs(
+      primaryArrangement.contextRefs,
+      secondaryArrangement.contextRefs
+    ),
+    ai: primaryArrangement.ai ?? secondaryArrangement.ai,
+    mergeSuggestion: undefined,
+    updatedAt: now,
+  };
+
+  return arrangements
+    .filter((arrangement) => arrangement.id !== secondaryArrangement.id)
+    .map((arrangement) =>
+      arrangement.id === primaryArrangement.id ? mergedArrangement : arrangement
+    );
+}
+
+export function restoreArrangementFromCompletionEvidence(
+  arrangement: ArrangementItem
+): ArrangementItem {
+  return {
+    ...arrangement,
+    status: arrangement.completionEvidence?.previousStatus ?? "pending",
+    completionEvidence: undefined,
+    updatedAt: Date.now(),
+  };
+}
+
+function isMergeCandidate(arrangement: ArrangementItem) {
+  return (
+    arrangement.status !== "completed" &&
+    arrangement.status !== "settled" &&
+    !arrangement.isDemo
+  );
+}
+
+function isCompletionCandidate(arrangement: ArrangementItem) {
+  return (
+    arrangement.status !== "completed" &&
+    arrangement.status !== "settled" &&
+    arrangement.status !== "later" &&
+    !arrangement.isDemo
+  );
+}
+
+function summarizeArrangement(arrangement: ArrangementItem) {
+  return {
+    id: arrangement.id,
+    title: arrangement.title,
+    description: arrangement.description ?? "",
+    status: arrangement.status,
+    sourceType: arrangement.sourceType,
+    timeText: arrangement.time.originalText ?? "",
+    startAtIso: arrangement.time.startAt
+      ? new Date(arrangement.time.startAt).toISOString()
+      : "",
+    location: arrangement.location ?? "",
+    participants: arrangement.participants.map((participant) => participant.name),
+    contextTexts: arrangement.contextRefs.map((contextRef) => contextRef.text),
+  };
+}
+
+async function requestJsonCompletion<Result>({
+  settings,
+  system,
+  payload,
+}: {
+  settings: AiModelSettings;
+  system: string;
+  payload: unknown;
+}) {
+  const endpoint = `${settings.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${settings.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: settings.model,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: JSON.stringify(payload) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const completion = (await response.json()) as ChatCompletionResponse;
+  const content = completion.choices?.[0]?.message?.content;
+  if (!content) {
+    throw new Error("Empty model response");
+  }
+
+  return JSON.parse(content) as Result;
+}
+
+function mergeNamedItems(
+  primaryItems: ArrangementParticipant[],
+  secondaryItems: ArrangementParticipant[],
+  prefix: string,
+  arrangementId: string,
+  now: number
+) {
+  const names = new Set(primaryItems.map((item) => item.name));
+  const additions = secondaryItems
+    .filter((item) => !names.has(item.name))
+    .map((item, index) => ({
+      id: item.id || `${prefix}-${arrangementId}-${now}-${index}`,
+      name: item.name,
+    }));
+  return [...primaryItems, ...additions];
+}
+
+function mergeTextItems(
+  primaryItems: ArrangementReminder[],
+  secondaryItems: ArrangementReminder[],
+  prefix: string,
+  arrangementId: string,
+  now: number
+) {
+  const texts = new Set(primaryItems.map((item) => item.text));
+  const additions = secondaryItems
+    .filter((item) => !texts.has(item.text))
+    .map((item, index) => ({
+      id: item.id || `${prefix}-${arrangementId}-${now}-${index}`,
+      text: item.text,
+      remindAt: item.remindAt,
+    }));
+  return [...primaryItems, ...additions];
+}
+
+function mergeContextRefs(
+  primaryRefs: ArrangementContextRef[],
+  secondaryRefs: ArrangementContextRef[]
+) {
+  const refKeys = new Set(primaryRefs.map(getContextRefKey));
+  const additions = secondaryRefs.filter((contextRef) => {
+    const key = getContextRefKey(contextRef);
+    if (refKeys.has(key)) return false;
+    refKeys.add(key);
+    return true;
+  });
+  return [...primaryRefs, ...additions];
+}
+
+function getContextRefKey(contextRef: ArrangementContextRef) {
+  return [
+    contextRef.sourceType,
+    contextRef.conversationId ?? "",
+    contextRef.messageId ?? "",
+    contextRef.text,
+  ].join("|");
+}
+
+function normalizeConfidence(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}
+
+function normalizeText(value: unknown) {
+  return typeof value === "string" ? value.trim() : undefined;
+}
