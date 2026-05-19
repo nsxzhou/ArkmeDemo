@@ -400,3 +400,85 @@ PLEASE IMPLEMENT THIS PLAN: 安排模块 V5 收尾。要求补齐群聊回复识
 - Playwright 手测通过：移动端 Demo 可进入安排页，清单/日历切换正常，月视图可选择日期并展示当天安排
 - Playwright 手测通过：消息测试后台 `/sendtest` 可切到群聊并发送“明天帮我带 A / 还有 B / C 也要”测试消息
 - 由于本轮未提供真实 API Key，未执行真实 LLM 成功路径；群聊识别成功链路已通过 TypeScript 构建、状态 normalizer、创建规则、失败/缺配置提示、重试入口和接入点静态验证覆盖
+
+## 2026-05-19 21:07:00 CST (+0800)
+
+### 用户输入
+PLEASE IMPLEMENT THIS PLAN: 对 `docs/arrangements-requirement-breakdown.md` 中 V1-V5 已完成功能做 review，并按代表场景覆盖模拟真人使用全链路；使用用户提供的 OpenAI 兼容配置调用真实 LLM；测试后清理浏览器 `localStorage`，日志脱敏且不把 API Key 写入仓库。
+
+### AI 最终输出
+已完成 V1-V5 review 与真实 LLM 代表场景模拟。发现两个主要问题：V4 相似合并在真实模型下对“后天去一趟医院”与“后天去医院检查”返回 `hasSimilarArrangement=false`、`confidence=0.2`，未达到合并阈值，说明当前纯 LLM 判断在核心合并验收场景上不稳定；需求文档仍有过期状态描述，包括末尾写着“V1-V4 已实现，V5 仍未实现”，以及完成机制、AI 元数据章节仍保留旧状态。静态门禁 `pnpm lint`、`pnpm build`、`pnpm verify:answer` 均通过。真实直连 API 与浏览器端请求均返回 200；发给自己、私聊承诺、群聊连续 A/B/C、完成推断均获得可解析 JSON 并满足对应创建/完成阈值；缺 Key 场景以 `missing_config` 状态验证低干扰兜底。测试结束后已恢复浏览器 localStorage，确认无 临时测试前缀残留、无 API Key 残留，并用仓库搜索确认完整 Key 和 Key 前缀未写入仓库文件。
+
+### 本轮改动文件
+- docs/codex-logs/candidate-周子睿-zhouzirui-20260518T105355-77fe8dea.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已确认上一轮 V5 记录存在于当前候选人个人日志和 `src/data/aiConversationLog.ts`
+- `pnpm setup:git-hooks` 通过
+- `pnpm lint` 通过
+- `pnpm build` 通过，存在 Vite chunk size warning，未阻断构建
+- `pnpm verify:answer` 通过
+- 真实直连 API：发给自己、私聊、群聊连续物品、完成判断四类请求均返回 200，且响应为可解析 JSON
+- Playwright 页面内真实请求：`POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200，浏览器端未遇到 CORS 阻断
+- V1 存储模拟通过：手动安排来源、提醒时间、状态 `later` 和编辑后标题可持久化
+- V2 浏览器端真实模型路径通过：发给自己“后天去一趟医院”返回 `hasArrangement=true`，创建来源为 `self`，同一来源消息计数为 1
+- V3 真实模型路径通过：私聊“明天来公司帮我带个早餐。/ 好的。”返回 `hasArrangement=true`、`isUserCommitted=true`、`confidence=0.95`
+- V4 完成判断通过：完成消息返回 `hasCompletedArrangement=true`、`confidence=0.9`；V4 相似合并未通过代表场景，模型返回 `hasSimilarArrangement=false`、`confidence=0.2`
+- V5 真实模型路径通过：群聊连续 A/B/C 返回 `hasArrangement=true`、`isUserCommitted=true`、`isRelatedToMe=true`、`confidence=0.9`，且结果包含 A/B/C；提醒时间和日历时间字段存在
+- 失败兜底验证通过：缺 Key 场景保存 `missing_config` 状态且不抛错
+- 浏览器测试清理通过：`localStorage` 恢复后无 临时测试前缀残留、无 API Key 残留
+- 已用 `rg` 确认完整 API Key、Key 前缀和 临时测试前缀未写入仓库文件
+
+## 2026-05-19 21:42:24 CST (+0800)
+
+### 用户输入
+是不是提示词方面的问题？
+
+### AI 最终输出
+是，主要是提示词问题，但不只是提示词。当前相似合并提示词里 `Prefer false unless they clearly refer to the same task, appointment, errand, or commitment.` 偏保守，模型会把“后天去一趟医院”和“后天去医院检查”理解成细节不完全一致而倾向 `false`。更准确的提示词应强调这是“可能相关安排建议”而不是自动合并，标题细节不同不代表不是同一件事，同一时间窗口加同一地点/场景/对象时应倾向提示用户确认，医院、体检、复查、挂号、看病等属于同一医疗就诊事项族。但仅改提示词仍有波动风险，工程上更稳的是“提示词优化 + 本地规则兜底”；如果只做当前阶段，直接原因就是提示词过于保守。
+
+### 本轮改动文件
+- 无
+
+### 验证结果
+- 已确认上一轮 review 记录存在于当前候选人个人日志和 `src/data/aiConversationLog.ts`
+- 问答解释阶段，未修改业务代码
+
+## 2026-05-19 21:45:44 CST (+0800)
+
+### 用户输入
+目前只考虑提示词优化
+
+### AI 最终输出
+已按“只考虑提示词优化”修复 V4 相似合并代表场景：仅更新 `src/data/arrangementContinuity.ts` 中相似安排检测的 system prompt，不新增本地规则兜底、不调整 `0.78` 合并建议阈值、不改变合并执行逻辑。新提示词明确这是“可能相关安排建议”，应用不会自动合并，用户仍需确认；同时要求模型对同一时间窗口、地点、人物或上下文重叠的事项提高召回，并将医院、诊所、医生、挂号、体检、复查、取药、症状等医疗就诊表达视为同一就诊事项族，除非日期、人物或地点存在明确冲突。真实 LLM 复测同一场景“后天去一趟医院” vs “后天去医院检查”已通过：返回 `hasSimilarArrangement=true`、`targetArrangementId=review-merge-target`、`confidence=0.9`，超过当前 `0.78` 阈值。
+
+### 本轮改动文件
+- src/data/arrangementContinuity.ts
+- docs/codex-logs/candidate-周子睿-zhouzirui-20260518T105355-77fe8dea.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已补录上一轮“是不是提示词方面的问题？”问答记录到当前候选人个人日志和 `src/data/aiConversationLog.ts`
+- `pnpm lint` 通过
+- `pnpm build` 通过，存在 Vite chunk size warning，未阻断构建
+- 真实 LLM 直连复测通过：`POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200；相似合并代表场景返回 `hasSimilarArrangement=true`、目标 ID 正确、`confidence=0.9`
+- 已用 `rg` 确认完整 API Key 和 Key 前缀未写入仓库文件
+
+## 2026-05-19 21:48:29 CST (+0800)
+
+### 用户输入
+重新跑一次这个验证，依旧使用用户提供的 OpenAI 兼容配置。API Key 属于敏感信息，本记录已脱敏，仅记录 `baseUrl=https://token-plan-cn.xiaomimimo.com/v1`、`model=mimo-v2.5` 和测试结论。
+
+### AI 最终输出
+已重新使用真实 LLM 跑 V4 相似合并代表场景验证。请求 `POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200，模型 `mimo-v2.5` 对“后天去一趟医院”与候选“后天去医院检查”返回 `hasSimilarArrangement=true`、`targetArrangementId=review-merge-target`、`confidence=0.9`，原因是同属医疗就诊事项、时间窗口重叠且没有日期/人物/地点冲突；结果超过当前 `0.78` 合并建议阈值，验证通过。已再次确认完整 API Key 和 Key 前缀未写入仓库文件。
+
+### 本轮改动文件
+- docs/codex-logs/candidate-周子睿-zhouzirui-20260518T105355-77fe8dea.md
+- src/data/aiConversationLog.ts
+
+### 验证结果
+- 已确认上一轮提示词优化记录存在于当前候选人个人日志和 `src/data/aiConversationLog.ts`
+- 真实 LLM 直连复测通过：`POST https://token-plan-cn.xiaomimimo.com/v1/chat/completions` 返回 200；返回 `hasSimilarArrangement=true`、目标 ID 正确、`confidence=0.9`
+- `git diff --check` 通过
+- 已用 `rg` 确认完整 API Key 和 Key 前缀未写入仓库文件

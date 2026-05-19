@@ -64,7 +64,7 @@ export async function detectSimilarArrangementForCreatedItem({
   const result = await requestJsonCompletion<SimilarArrangementResult>({
     settings,
     system:
-      "You detect whether a newly created future arrangement is the same real-world matter as one existing arrangement. Return only JSON. Prefer false unless they clearly refer to the same task, appointment, errand, or commitment.",
+      "You detect whether a newly created future arrangement should be shown as a possible merge suggestion for one existing arrangement. Return only JSON. The app will not merge automatically; a user must confirm the suggestion. Favor recall for likely same real-world matters: small title differences, one item being more specific than the other, or one item naming the purpose should still count as similar when the time window, place, people, or context overlap. Treat medical visit terms such as hospital, clinic, doctor, appointment, checkup, physical exam, follow-up, registration, medicine pickup, and symptoms as one healthcare-visit matter unless the dates, people, or places clearly conflict. Return false only when they are clearly different matters or there is a concrete conflict.",
     payload: {
       nowIso: new Date().toISOString(),
       timezone: "Asia/Shanghai",
