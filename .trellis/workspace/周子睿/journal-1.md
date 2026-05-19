@@ -75,3 +75,36 @@ Implemented V2 real OpenAI-compatible recognition for Send to self: local AI mod
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: Arrangements light organization
+
+**Date**: 2026-05-19
+**Task**: Arrangements light organization
+**Branch**: `main`
+
+### Summary
+
+Implemented V6 light organization, reminder acknowledgement and snooze, AI settlement throttling, settlement evidence restore flow, and improved the arrangement editor close action.
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `213880c` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
