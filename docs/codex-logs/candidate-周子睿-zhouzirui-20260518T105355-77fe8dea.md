@@ -292,3 +292,19 @@ PLEASE IMPLEMENT THIS PLAN: V3 私聊识别安排。要求在私聊中识别“�
 - Playwright 手测通过：私聊回复“好的。”后创建安排“帮我带个早餐”，来源类型为 `private_chat`，上下文包含对方请求和我方回复，聊天内出现“已创建安排”轻提示
 - 已清理浏览器 localStorage 中的 AI 配置、私聊识别状态、测试消息和测试安排
 - 已用 `rg` 确认完整 API Key 未写入仓库文件
+
+## 2026-05-19 11:10:47 CST (+0800)
+
+### 用户输入
+继续使用 `$grill-me` 和 `$frontend-design`，围绕 `docs/arrangements-requirement-breakdown.md` 规划后续阶段完成安排模块任务。
+
+### AI 最终输出
+已输出 V4 实施计划：下一阶段实施「合并归集与完成判断」，范围只覆盖已完成的发给自己和私聊来源，不提前做群聊、日历、真实通知或重复提醒；新增 AI 相似安排检测和高置信完成判断，合并建议只在安排详情中展示并由用户确认，确认后保留较早安排作为主安排并合入新来源上下文；完成判断采用 `confidence >= 0.9` 且明确完成表述才自动完成，并在详情保留 AI 依据和撤销入口。计划还明确新增 AI 设置开关、补齐三语文案、更新需求拆解与日志，并要求完成 `pnpm lint`、`pnpm build`、`pnpm verify:answer` 和移动端手测。
+
+### 本轮改动文件
+- 无
+
+### 验证结果
+- 已读取项目规范、Trellis frontend 规格、`docs/arrangements-requirement-breakdown.md` 和现有安排/AI 识别代码
+- 已确认 V1-V3 已完成，V4 应优先做合并归集与完成判断
+- 计划阶段未修改业务代码
