@@ -14,6 +14,7 @@ import {
   type AiModelSettings,
 } from "@/data/aiModelSettings";
 import {
+  autoSettleArrangementsAfterCreatedItem,
   detectSimilarArrangementForCreatedItem,
   inferCompletedArrangementFromSource,
 } from "@/data/arrangementContinuity";
@@ -879,6 +880,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
               createdArrangement: nextState.createdArrangement,
               settings: aiModelSettings,
             }).catch(() => undefined);
+            autoSettleArrangementsAfterCreatedItem({
+              createdArrangement: nextState.createdArrangement,
+              settings: aiModelSettings,
+            }).catch(() => undefined);
           }
         })
         .catch((error: unknown) => {
@@ -959,6 +964,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           upsertPrivateRecognitionState(nextState);
           if (nextState.createdArrangement) {
             detectSimilarArrangementForCreatedItem({
+              createdArrangement: nextState.createdArrangement,
+              settings: aiModelSettings,
+            }).catch(() => undefined);
+            autoSettleArrangementsAfterCreatedItem({
               createdArrangement: nextState.createdArrangement,
               settings: aiModelSettings,
             }).catch(() => undefined);
@@ -1047,6 +1056,10 @@ export default function Home({ currentPage, onNavigate }: HomeProps) {
           upsertGroupRecognitionState(nextState);
           if (nextState.createdArrangement) {
             detectSimilarArrangementForCreatedItem({
+              createdArrangement: nextState.createdArrangement,
+              settings: aiModelSettings,
+            }).catch(() => undefined);
+            autoSettleArrangementsAfterCreatedItem({
               createdArrangement: nextState.createdArrangement,
               settings: aiModelSettings,
             }).catch(() => undefined);

@@ -6,6 +6,7 @@ import type {
   ArrangementMergeSuggestion,
   ArrangementParticipant,
   ArrangementReminder,
+  ArrangementSettlementEvidence,
   ArrangementSourceType,
   ArrangementStatus,
   ArrangementTime,
@@ -271,6 +272,7 @@ function normalizeArrangement(value: unknown): ArrangementItem | null {
     ai: normalizeAiMeta(value.ai),
     mergeSuggestion: normalizeMergeSuggestion(value.mergeSuggestion),
     completionEvidence: normalizeCompletionEvidence(value.completionEvidence),
+    settlementEvidence: normalizeSettlementEvidence(value.settlementEvidence),
     createdAt,
     updatedAt,
     isDemo: value.isDemo === true,
@@ -304,11 +306,13 @@ function normalizeReminder(value: unknown): ArrangementReminder | null {
   const id = normalizeOptionalText(value.id);
   const text = normalizeOptionalText(value.text);
   const remindAt = normalizeTimestamp(value.remindAt);
+  const acknowledgedAt = normalizeTimestamp(value.acknowledgedAt);
   if (!id || !text) return null;
   return {
     id,
     text,
     ...(remindAt !== null ? { remindAt } : {}),
+    ...(acknowledgedAt !== null ? { acknowledgedAt } : {}),
   };
 }
 
@@ -381,6 +385,24 @@ function normalizeCompletionEvidence(
     messageId: normalizeOptionalText(value.messageId),
     detectedAt,
     previousStatus: normalizeStatus(value.previousStatus),
+  };
+}
+
+function normalizeSettlementEvidence(
+  value: unknown
+): ArrangementSettlementEvidence | undefined {
+  if (!isRecord(value)) return undefined;
+  const confidence = normalizeConfidence(value.confidence);
+  const settledAt = normalizeTimestamp(value.settledAt);
+  if (confidence === null || settledAt === null) return undefined;
+
+  return {
+    model: normalizeOptionalText(value.model) ?? "",
+    confidence,
+    reason: normalizeOptionalText(value.reason),
+    previousStatus: normalizeStatus(value.previousStatus),
+    settledAt,
+    triggerArrangementId: normalizeOptionalText(value.triggerArrangementId),
   };
 }
 

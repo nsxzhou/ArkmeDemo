@@ -35,6 +35,7 @@ export type ArrangementReminder = {
   id: string;
   text: string;
   remindAt?: number;
+  acknowledgedAt?: number;
 };
 
 export type ArrangementContextRef = {
@@ -74,6 +75,15 @@ export type ArrangementCompletionEvidence = {
   previousStatus: ArrangementStatus;
 };
 
+export type ArrangementSettlementEvidence = {
+  model: string;
+  confidence: number;
+  reason?: string;
+  previousStatus: ArrangementStatus;
+  settledAt: number;
+  triggerArrangementId?: string;
+};
+
 export type ArrangementItem = {
   id: string;
   title: string;
@@ -88,6 +98,7 @@ export type ArrangementItem = {
   ai?: ArrangementAiMeta;
   mergeSuggestion?: ArrangementMergeSuggestion;
   completionEvidence?: ArrangementCompletionEvidence;
+  settlementEvidence?: ArrangementSettlementEvidence;
   createdAt: number;
   updatedAt: number;
   isDemo?: boolean;

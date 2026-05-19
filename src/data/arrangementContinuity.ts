@@ -34,6 +34,17 @@ type CompletionInferenceResult = {
   reason?: string;
 };
 
+type SettlementCandidateResult = {
+  arrangementId: string;
+  shouldSettle: boolean;
+  confidence?: number;
+  reason?: string;
+};
+
+type SettlementInferenceResult = {
+  settledArrangements?: SettlementCandidateResult[];
+};
+
 export type ArrangementContinuitySource = {
   text: string;
   sourceType: ArrangementContextRef["sourceType"];
@@ -41,8 +52,13 @@ export type ArrangementContinuitySource = {
   messageId?: string;
 };
 
+export const arrangementSettlementRunStorageKey =
+  "arkme-demo.arrangementContinuity.settlementRun";
+
 const mergeSuggestionConfidenceThreshold = 0.78;
 const completionConfidenceThreshold = 0.9;
+const settlementConfidenceThreshold = 0.9;
+const settlementRunIntervalMs = 60 * 60 * 1000;
 
 export async function detectSimilarArrangementForCreatedItem({
   createdArrangement,
@@ -247,6 +263,102 @@ export function restoreArrangementFromCompletionEvidence(
   };
 }
 
+export async function autoSettleArrangementsAfterCreatedItem({
+  createdArrangement,
+  settings,
+}: {
+  createdArrangement: ArrangementItem;
+  settings: AiModelSettings;
+}) {
+  if (!settings.apiKey.trim() || !shouldRunSettlementScan()) return [];
+
+  markSettlementScanRun();
+
+  const arrangements = getInitialArrangements();
+  if (arrangements.length === 0) return [];
+
+  const result = await requestJsonCompletion<SettlementInferenceResult>({
+    settings,
+    system:
+      "You help reduce pressure in a gentle future-arrangement list. Return only JSON. You may suggest arrangements to quietly settle when they no longer need active attention, are clearly stale, duplicated by newer context, already fulfilled, or safe to stop surfacing. The app will preserve the previous status and allow undo. Be conservative: do not settle plans that still look time-sensitive, emotionally important, recently created, or explicitly marked as still active.",
+    payload: {
+      nowIso: new Date().toISOString(),
+      timezone: "Asia/Shanghai",
+      requiredJsonShape: {
+        settledArrangements: [
+          {
+            arrangementId: "string id from arrangements",
+            shouldSettle: "boolean",
+            confidence: "number from 0 to 1",
+            reason: "short string",
+          },
+        ],
+      },
+      triggerArrangement: summarizeArrangement(createdArrangement),
+      arrangements: arrangements.map(summarizeArrangement),
+    },
+  });
+
+  const candidates = Array.isArray(result.settledArrangements)
+    ? result.settledArrangements
+    : [];
+  const settlementById = new Map(
+    candidates
+      .filter((candidate) => candidate.shouldSettle === true)
+      .map((candidate) => [
+        normalizeText(candidate.arrangementId),
+        {
+          confidence: normalizeConfidence(candidate.confidence),
+          reason: normalizeText(candidate.reason),
+        },
+      ])
+  );
+  const now = Date.now();
+  const settledIds: string[] = [];
+  const nextArrangements = getInitialArrangements().map((arrangement) => {
+    const settlement = settlementById.get(arrangement.id);
+    if (
+      !settlement ||
+      settlement.confidence < settlementConfidenceThreshold ||
+      arrangement.status === "settled"
+    ) {
+      return arrangement;
+    }
+
+    settledIds.push(arrangement.id);
+    return {
+      ...arrangement,
+      status: "settled",
+      settlementEvidence: {
+        model: settings.model,
+        confidence: settlement.confidence,
+        reason: settlement.reason,
+        previousStatus: arrangement.status,
+        settledAt: now,
+        triggerArrangementId: createdArrangement.id,
+      },
+      updatedAt: now,
+    } satisfies ArrangementItem;
+  });
+
+  if (settledIds.length > 0) {
+    persistArrangements(nextArrangements);
+  }
+
+  return settledIds;
+}
+
+export function restoreArrangementFromSettlementEvidence(
+  arrangement: ArrangementItem
+): ArrangementItem {
+  return {
+    ...arrangement,
+    status: arrangement.settlementEvidence?.previousStatus ?? "pending",
+    settlementEvidence: undefined,
+    updatedAt: Date.now(),
+  };
+}
+
 function isMergeCandidate(arrangement: ArrangementItem) {
   return (
     arrangement.status !== "completed" &&
@@ -278,7 +390,51 @@ function summarizeArrangement(arrangement: ArrangementItem) {
     location: arrangement.location ?? "",
     participants: arrangement.participants.map((participant) => participant.name),
     contextTexts: arrangement.contextRefs.map((contextRef) => contextRef.text),
+    createdAtIso: new Date(arrangement.createdAt).toISOString(),
+    updatedAtIso: new Date(arrangement.updatedAt).toISOString(),
+    reminderTexts: arrangement.reminders.map((reminder) => reminder.text),
+    reminderAtIso: arrangement.reminders
+      .map((reminder) =>
+        reminder.remindAt ? new Date(reminder.remindAt).toISOString() : ""
+      )
+      .filter(Boolean),
   };
+}
+
+function shouldRunSettlementScan(now = Date.now()) {
+  if (typeof window === "undefined") return false;
+
+  try {
+    const storedValue = window.localStorage.getItem(
+      arrangementSettlementRunStorageKey
+    );
+    if (!storedValue) return true;
+    const parsedValue = JSON.parse(storedValue);
+    if (
+      !parsedValue ||
+      typeof parsedValue !== "object" ||
+      typeof parsedValue.lastRunAt !== "number" ||
+      !Number.isFinite(parsedValue.lastRunAt)
+    ) {
+      return true;
+    }
+    return now - parsedValue.lastRunAt >= settlementRunIntervalMs;
+  } catch {
+    return true;
+  }
+}
+
+function markSettlementScanRun(now = Date.now()) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.localStorage.setItem(
+      arrangementSettlementRunStorageKey,
+      JSON.stringify({ lastRunAt: now })
+    );
+  } catch {
+    // Settlement scan throttling is best effort.
+  }
 }
 
 async function requestJsonCompletion<Result>({

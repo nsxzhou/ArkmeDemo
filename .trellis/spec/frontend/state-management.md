@@ -31,7 +31,15 @@ There is no server state in the current demo. The interview upload script is a N
 - Send-to-self recognition uses `arkme-demo.arrangementRecognition.self` and deduplicates by `recordUid`.
 - Private-chat recognition uses `arkme-demo.arrangementRecognition.private` and deduplicates by `conversationId + replyMessageId`.
 - Group-chat recognition uses `arkme-demo.arrangementRecognition.group` and deduplicates by `conversationId + replyMessageId`.
+- Arrangement continuity settlement throttling uses `arkme-demo.arrangementContinuity.settlementRun` with a `lastRunAt` timestamp so automatic settlement scanning runs at most once per hour after new arrangement creation.
 - New arrangement recognition modules must expose `getInitial*States`, `persist*States`, `create*RecognitionState`, and `recognize*Arrangement` helpers so `Home.tsx` can keep UI state, retry behavior, and storage normalization consistent.
+
+## Arrangement Settlement and Reminder State
+
+- `ArrangementItem.status = "settled"` means the item is quieted from the main list and calendar, not deleted.
+- When AI or light organization settles an arrangement, keep `settlementEvidence.previousStatus` so restore returns to the user's prior state rather than always going back to pending.
+- Reminder acknowledgement is stored on the first reminder as `acknowledgedAt`; acknowledged reminders should not appear in the light organization reminder panel again.
+- Snoozing an in-app reminder updates `remindAt` to the next local 09:00 target and clears `acknowledgedAt`.
 
 ## Arrangement Time Extraction Contract
 
@@ -48,3 +56,4 @@ There is no server state in the current demo. The interview upload script is a N
 - Forgetting to dispatch or listen for `arkme-demo:test-conversations-updated` when test conversation data changes in the same tab.
 - Adding a new arrangement recognition localStorage key without a normalizer and a persistable-state mapper.
 - Assuming a visible `time.originalText` value means the item can appear in the calendar. Calendar grouping only uses `time.startAt`.
+- Settling an arrangement without preserving `settlementEvidence.previousStatus`; this loses the difference between pending, completed, later, and in-progress arrangements.

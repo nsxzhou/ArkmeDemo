@@ -34,6 +34,8 @@ Examples:
 - Use `Record<string, number>` for simple dictionary-like state such as `TestReadState`.
 - Use `Partial<T>` only after verifying an unknown value is an object.
 - When extending arrangement drafts or stored arrangement fields, update `src/types/arrangement.ts`, `createEmptyArrangementDraft`, `createDraftFromArrangement`, `createArrangementFromDraft`, `updateArrangementFromDraft`, and the relevant stored normalizer together. For example, `ArrangementDraft.reminderAt` must round-trip through `ArrangementReminder.remindAt` and `normalizeReminder`.
+- When adding arrangement evidence fields such as `completionEvidence` or `settlementEvidence`, define an explicit exported type and normalize each timestamp, confidence, status, and optional text field before exposing stored data to React components.
+- Reminder state fields such as `acknowledgedAt` must be normalized with `normalizeTimestamp`; do not assume old localStorage records contain the new field.
 
 ## Forbidden Patterns
 

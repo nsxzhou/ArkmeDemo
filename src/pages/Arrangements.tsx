@@ -15,6 +15,7 @@ import {
 import {
   mergeArrangementIntoSuggestedTarget,
   restoreArrangementFromCompletionEvidence,
+  restoreArrangementFromSettlementEvidence,
 } from "@/data/arrangementContinuity";
 import { cn } from "@/lib/utils";
 import { usePreferences } from "@/settings/preferences";
@@ -67,6 +68,14 @@ export default function Arrangements({
   );
   const reminderHighlights = React.useMemo(
     () => getReminderHighlights(arrangements),
+    [arrangements]
+  );
+  const quietingSuggestions = React.useMemo(
+    () => getQuietingSuggestions(arrangements),
+    [arrangements]
+  );
+  const settledArrangements = React.useMemo(
+    () => getRecentSettledArrangements(arrangements),
     [arrangements]
   );
   const activeCount = arrangements.filter(
@@ -183,6 +192,67 @@ export default function Arrangements({
     setViewingArrangement(nextViewingArrangement);
   };
 
+  const settleArrangement = (arrangementId: string) => {
+    const now = Date.now();
+    let nextViewingArrangement: ArrangementItem | null = null;
+    const nextArrangements = arrangements.map((arrangement) => {
+      if (arrangement.id !== arrangementId) return arrangement;
+      const settledArrangement = {
+        ...arrangement,
+        status: "settled",
+        settlementEvidence: {
+          model: "local-rule",
+          confidence: 1,
+          reason: t("arrangements.localSettleReason"),
+          previousStatus: arrangement.status,
+          settledAt: now,
+        },
+        updatedAt: now,
+      } satisfies ArrangementItem;
+      nextViewingArrangement = settledArrangement;
+      return settledArrangement;
+    });
+    replaceArrangements(nextArrangements);
+    setViewingArrangement(nextViewingArrangement);
+  };
+
+  const restoreFromSettlement = (arrangementId: string) => {
+    let nextViewingArrangement: ArrangementItem | null = null;
+    const nextArrangements = arrangements.map((arrangement) => {
+      if (arrangement.id !== arrangementId) return arrangement;
+      const restoredArrangement = restoreArrangementFromSettlementEvidence(arrangement);
+      nextViewingArrangement = restoredArrangement;
+      return restoredArrangement;
+    });
+    replaceArrangements(nextArrangements);
+    setViewingArrangement(nextViewingArrangement);
+  };
+
+  const acknowledgeReminder = (arrangementId: string) => {
+    const now = Date.now();
+    replaceArrangements(
+      arrangements.map((arrangement) =>
+        arrangement.id === arrangementId
+          ? updateFirstReminder(arrangement, { acknowledgedAt: now })
+          : arrangement
+      )
+    );
+  };
+
+  const snoozeReminder = (arrangementId: string) => {
+    const remindAt = getTomorrowMorningTimestamp();
+    replaceArrangements(
+      arrangements.map((arrangement) =>
+        arrangement.id === arrangementId
+          ? updateFirstReminder(arrangement, {
+              remindAt,
+              acknowledgedAt: undefined,
+            })
+          : arrangement
+      )
+    );
+  };
+
   const deleteArrangement = (arrangementId: string) => {
     replaceArrangements(
       arrangements.filter((arrangement) => arrangement.id !== arrangementId)
@@ -259,11 +329,19 @@ export default function Arrangements({
       </header>
 
       <main className="min-h-0 flex-1 overflow-y-auto px-3 pb-5">
-        {reminderHighlights.length > 0 && (
-          <ReminderHighlightPanel
+        {(reminderHighlights.length > 0 ||
+          quietingSuggestions.length > 0 ||
+          settledArrangements.length > 0) && (
+          <LightOrganizationPanel
             reminders={reminderHighlights}
+            quietingSuggestions={quietingSuggestions}
+            settledArrangements={settledArrangements}
             resolvedLocale={resolvedLocale}
             onOpen={setViewingArrangement}
+            onAcknowledgeReminder={acknowledgeReminder}
+            onSnoozeReminder={snoozeReminder}
+            onSettle={settleArrangement}
+            onRestoreSettlement={restoreFromSettlement}
           />
         )}
 
@@ -334,8 +412,10 @@ export default function Arrangements({
           onComplete={() => updateArrangementStatus(viewingArrangement.id, "completed")}
           onLater={() => updateArrangementStatus(viewingArrangement.id, "later")}
           onRestore={() => updateArrangementStatus(viewingArrangement.id, "pending")}
+          onSettle={() => settleArrangement(viewingArrangement.id)}
           onMergeSuggested={() => mergeSuggestedArrangement(viewingArrangement.id)}
           onRestoreCompletion={() => restoreFromAiCompletion(viewingArrangement.id)}
+          onRestoreSettlement={() => restoreFromSettlement(viewingArrangement.id)}
           onDelete={() => deleteArrangement(viewingArrangement.id)}
           onOpenSourceConversation={onOpenSourceConversation}
         />
@@ -344,55 +424,173 @@ export default function Arrangements({
   );
 }
 
-function ReminderHighlightPanel({
+function LightOrganizationPanel({
   reminders,
+  quietingSuggestions,
+  settledArrangements,
   resolvedLocale,
   onOpen,
+  onAcknowledgeReminder,
+  onSnoozeReminder,
+  onSettle,
+  onRestoreSettlement,
 }: {
   reminders: ArrangementItem[];
+  quietingSuggestions: ArrangementItem[];
+  settledArrangements: ArrangementItem[];
   resolvedLocale: string;
   onOpen: (arrangement: ArrangementItem) => void;
+  onAcknowledgeReminder: (arrangementId: string) => void;
+  onSnoozeReminder: (arrangementId: string) => void;
+  onSettle: (arrangementId: string) => void;
+  onRestoreSettlement: (arrangementId: string) => void;
 }) {
   const { t } = usePreferences();
+  const panelCount =
+    reminders.length + quietingSuggestions.length + settledArrangements.length;
 
   return (
-    <section className="mb-3 rounded-[14px] border border-warning/30 bg-warning/10 px-3 py-3">
+    <section className="mb-3 rounded-[14px] border border-warning/25 bg-warning/10 px-3 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[13px] font-semibold leading-5 text-text">
-            {t("arrangements.reminderPanelTitle")}
+            {t("arrangements.lightPanelTitle")}
           </p>
           <p className="text-[11px] leading-4 text-text-tertiary">
-            {t("arrangements.reminderPanelDesc")}
+            {t("arrangements.lightPanelDesc")}
           </p>
         </div>
         <span className="shrink-0 rounded-full bg-surface px-2 py-1 text-[11px] font-medium leading-4 text-warning">
-          {reminders.length}
+          {panelCount}
         </span>
       </div>
-      <div className="mt-2 space-y-2">
+
+      {reminders.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <p className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+            {t("arrangements.reminderPanelTitle")}
+          </p>
         {reminders.slice(0, 3).map((arrangement) => (
-          <button
+          <div
             key={arrangement.id}
-            type="button"
-            onClick={() => onOpen(arrangement)}
-            className="flex w-full items-center justify-between gap-3 rounded-[10px] bg-surface/85 px-3 py-2 text-left transition active:scale-[0.99]"
+            className="rounded-[10px] bg-surface/85 px-3 py-2"
           >
-            <span className="min-w-0">
+            <button
+              type="button"
+              onClick={() => onOpen(arrangement)}
+              className="block w-full text-left transition active:scale-[0.99]"
+            >
               <span className="block truncate text-[13px] font-medium leading-5 text-text">
                 {arrangement.title}
               </span>
               <span className="block text-[11px] leading-4 text-text-tertiary">
                 {formatReminderTime(arrangement, resolvedLocale, t)}
               </span>
-            </span>
-            <span className="shrink-0 text-[12px] font-medium text-primary">
-              {t("arrangements.openReminder")}
-            </span>
-          </button>
+            </button>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <PanelActionButton
+                label={t("arrangements.reminderAck")}
+                onClick={() => onAcknowledgeReminder(arrangement.id)}
+              />
+              <PanelActionButton
+                label={t("arrangements.reminderSnooze")}
+                onClick={() => onSnoozeReminder(arrangement.id)}
+              />
+            </div>
+          </div>
         ))}
       </div>
+      )}
+
+      {quietingSuggestions.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <p className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+            {t("arrangements.quietingTitle")}
+          </p>
+          {quietingSuggestions.slice(0, 3).map((arrangement) => (
+            <div key={arrangement.id} className="rounded-[10px] bg-surface/85 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => onOpen(arrangement)}
+                className="block w-full text-left transition active:scale-[0.99]"
+              >
+                <span className="block truncate text-[13px] font-medium leading-5 text-text">
+                  {arrangement.title}
+                </span>
+                <span className="block text-[11px] leading-4 text-text-tertiary">
+                  {formatArrangementTime(arrangement, resolvedLocale, t)}
+                </span>
+              </button>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <PanelActionButton
+                  label={t("arrangements.quietingSettle")}
+                  onClick={() => onSettle(arrangement.id)}
+                  primary
+                />
+                <PanelActionButton
+                  label={t("arrangements.openReminder")}
+                  onClick={() => onOpen(arrangement)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {settledArrangements.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <p className="px-1 text-[11px] font-medium leading-4 text-text-tertiary">
+            {t("arrangements.settledRecentTitle")}
+          </p>
+          {settledArrangements.slice(0, 3).map((arrangement) => (
+            <div key={arrangement.id} className="rounded-[10px] bg-surface/75 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => onOpen(arrangement)}
+                className="block w-full text-left transition active:scale-[0.99]"
+              >
+                <span className="block truncate text-[13px] font-medium leading-5 text-text">
+                  {arrangement.title}
+                </span>
+                <span className="block text-[11px] leading-4 text-text-tertiary">
+                  {arrangement.settlementEvidence?.reason ??
+                    t("arrangements.settledRecentDesc")}
+                </span>
+              </button>
+              <div className="mt-2">
+                <PanelActionButton
+                  label={t("arrangements.settledRestore")}
+                  onClick={() => onRestoreSettlement(arrangement.id)}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </section>
+  );
+}
+
+function PanelActionButton({
+  label,
+  onClick,
+  primary,
+}: {
+  label: string;
+  onClick: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "min-h-[32px] rounded-[9px] px-2 text-[12px] font-medium leading-4 transition active:scale-[0.98]",
+        primary ? "bg-primary text-on-primary" : "bg-surface-muted text-text-muted"
+      )}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -712,13 +910,23 @@ function ArrangementEditorSheet({
   return (
     <SheetFrame onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border-light px-4 pb-3 pt-4">
-        <div>
-          <h2 className="text-[18px] font-semibold leading-6 text-text">
-            {arrangement ? t("arrangements.editTitle") : t("arrangements.createTitle")}
-          </h2>
-          <p className="mt-0.5 text-[12px] leading-4 text-text-tertiary">
-            {t("arrangements.editorDesc")}
-          </p>
+        <div className="flex min-w-0 items-start gap-2.5">
+          <button
+            type="button"
+            onClick={onClose}
+            className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-bg text-text-muted transition active:scale-[0.96]"
+            aria-label={t("search.close")}
+          >
+            <CloseIcon className="h-4 w-4" />
+          </button>
+          <div className="min-w-0">
+            <h2 className="text-[18px] font-semibold leading-6 text-text">
+              {arrangement ? t("arrangements.editTitle") : t("arrangements.createTitle")}
+            </h2>
+            <p className="mt-0.5 text-[12px] leading-4 text-text-tertiary">
+              {t("arrangements.editorDesc")}
+            </p>
+          </div>
         </div>
         <button
           type="button"
@@ -839,8 +1047,10 @@ function ArrangementDetailSheet({
   onComplete,
   onLater,
   onRestore,
+  onSettle,
   onMergeSuggested,
   onRestoreCompletion,
+  onRestoreSettlement,
   onDelete,
   onOpenSourceConversation,
 }: {
@@ -851,8 +1061,10 @@ function ArrangementDetailSheet({
   onComplete: () => void;
   onLater: () => void;
   onRestore: () => void;
+  onSettle: () => void;
   onMergeSuggested: () => void;
   onRestoreCompletion: () => void;
+  onRestoreSettlement: () => void;
   onDelete: () => void;
   onOpenSourceConversation?: (conversationId: string, recordUid?: string) => void;
 }) {
@@ -1029,15 +1241,58 @@ function ArrangementDetailSheet({
           </section>
         )}
 
+        {arrangement.settlementEvidence && (
+          <section className="mt-4 rounded-[14px] border border-border-light bg-bg px-3 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-semibold leading-5 text-text">
+                  {t("arrangements.settlementEvidenceTitle")}
+                </h3>
+                <p className="mt-1 text-[12px] leading-5 text-text-muted">
+                  {formatTemplate(t("arrangements.settlementEvidenceDesc"), {
+                    confidence: `${Math.round(
+                      arrangement.settlementEvidence.confidence * 100
+                    )}%`,
+                  })}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={onRestoreSettlement}
+                className="shrink-0 rounded-full bg-surface px-3 py-1.5 text-[12px] font-medium leading-4 text-primary transition active:scale-[0.98]"
+              >
+                {t("arrangements.settledRestore")}
+              </button>
+            </div>
+            {arrangement.settlementEvidence.reason && (
+              <p className="mt-2 rounded-[10px] bg-surface-muted px-3 py-2 text-[12px] leading-5 text-text-muted">
+                {arrangement.settlementEvidence.reason}
+              </p>
+            )}
+          </section>
+        )}
+
         <div className="mt-4 grid grid-cols-2 gap-2">
-          {arrangement.status !== "completed" && (
+          {arrangement.status !== "completed" && arrangement.status !== "settled" && (
             <ActionButton label={t("arrangements.actionComplete")} onClick={onComplete} primary />
           )}
-          {arrangement.status !== "later" && (
+          {arrangement.status !== "later" && arrangement.status !== "settled" && (
             <ActionButton label={t("arrangements.actionLater")} onClick={onLater} />
           )}
-          {(arrangement.status === "later" || arrangement.status === "completed") && (
-            <ActionButton label={t("arrangements.actionRestore")} onClick={onRestore} />
+          {arrangement.status !== "settled" && (
+            <ActionButton label={t("arrangements.actionSettle")} onClick={onSettle} />
+          )}
+          {(arrangement.status === "later" ||
+            arrangement.status === "completed" ||
+            arrangement.status === "settled") && (
+            <ActionButton
+              label={t("arrangements.actionRestore")}
+              onClick={
+                arrangement.status === "settled" && arrangement.settlementEvidence
+                  ? onRestoreSettlement
+                  : onRestore
+              }
+            />
           )}
           <ActionButton label={t("arrangements.actionEdit")} onClick={onEdit} />
           <ActionButton label={t("arrangements.actionDelete")} onClick={onDelete} />
@@ -1204,7 +1459,11 @@ function getReminderHighlights(arrangements: ArrangementItem[]) {
     )
     .filter((arrangement) => {
       const remindAt = arrangement.reminders[0]?.remindAt;
-      return remindAt !== undefined && remindAt <= nextDay;
+      return (
+        remindAt !== undefined &&
+        remindAt <= nextDay &&
+        arrangement.reminders[0]?.acknowledgedAt === undefined
+      );
     })
     .sort(
       (left, right) =>
@@ -1213,12 +1472,75 @@ function getReminderHighlights(arrangements: ArrangementItem[]) {
     );
 }
 
+function getQuietingSuggestions(arrangements: ArrangementItem[], now = Date.now()) {
+  const quietingThreshold = startOfDay(now) - 7 * 24 * 60 * 60 * 1000;
+  return arrangements
+    .filter(
+      (arrangement) =>
+        arrangement.status !== "completed" &&
+        arrangement.status !== "later" &&
+        arrangement.status !== "settled" &&
+        arrangement.time.startAt !== undefined &&
+        arrangement.time.startAt < quietingThreshold
+    )
+    .sort((left, right) => (left.time.startAt ?? 0) - (right.time.startAt ?? 0));
+}
+
+function getRecentSettledArrangements(arrangements: ArrangementItem[]) {
+  return arrangements
+    .filter((arrangement) => arrangement.status === "settled")
+    .sort((left, right) => {
+      const leftTime = left.settlementEvidence?.settledAt ?? left.updatedAt;
+      const rightTime = right.settlementEvidence?.settledAt ?? right.updatedAt;
+      return rightTime - leftTime;
+    });
+}
+
+function updateFirstReminder(
+  arrangement: ArrangementItem,
+  updates: { remindAt?: number; acknowledgedAt?: number }
+): ArrangementItem {
+  const [firstReminder, ...restReminders] = arrangement.reminders;
+  if (!firstReminder) return arrangement;
+
+  const nextReminder = {
+    ...firstReminder,
+    ...(updates.remindAt !== undefined ? { remindAt: updates.remindAt } : {}),
+    ...(updates.acknowledgedAt !== undefined
+      ? { acknowledgedAt: updates.acknowledgedAt }
+      : {}),
+  };
+
+  if (updates.acknowledgedAt === undefined && "acknowledgedAt" in updates) {
+    delete nextReminder.acknowledgedAt;
+  }
+
+  return {
+    ...arrangement,
+    reminders: [nextReminder, ...restReminders],
+    updatedAt: Date.now(),
+  };
+}
+
+function getTomorrowMorningTimestamp(now = Date.now()) {
+  const date = new Date(now);
+  date.setDate(date.getDate() + 1);
+  date.setHours(9, 0, 0, 0);
+  return date.getTime();
+}
+
 function createDayKey(timestamp: number) {
   const date = new Date(timestamp);
   const year = date.getFullYear();
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function startOfDay(value: number) {
+  const date = new Date(value);
+  date.setHours(0, 0, 0, 0);
+  return date.getTime();
 }
 
 function buildCalendarDays(monthAnchor: Date) {
